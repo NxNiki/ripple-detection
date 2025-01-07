@@ -4,7 +4,7 @@
 
 First setup your conda environment:
 ```
-conda create --name ripple-detection
+conda env create -f environments.yml
 ```
 
 Activate environment:
@@ -12,7 +12,7 @@ Activate environment:
 conda activate ripple-detection
 ```
 
-Then run the following to install additional libraries:
+When you modify `environments.yml`, run the following command to update the environment:
 ```
 conda env update --file environment.yml --prune
 ```
