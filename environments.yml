@@ -1,4 +1,4 @@
-name: ripple_env
+name: ripple-detection
 channels:
   - pennmem
   - conda-forge
