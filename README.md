@@ -3,7 +3,7 @@
 ## environment set up
 
 > [!NOTE]
-> Some packages like `_libgcc_mutex`, `_openmp_mutex`, and `ld_impl_linux-64` are Linux-specific and cannot be installed on macOS.
+> Some packages like `_libgcc_mutex`, `_openmp_mutex`, and `ld_impl_linux-64` are Linux-specific and cannot be installed on macOS with M1 chip.
 
 First setup your conda environment:
 ```
