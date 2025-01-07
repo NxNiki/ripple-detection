@@ -104,7 +104,7 @@ dependencies:
   - ply=3.11
   - prompt-toolkit=3.0.36
   - psutil=5.9.0
-  # - ptsa=3.0.4
+  - ptsa=3.0.4
   - ptyprocess=0.7.0
   - pure_eval=0.2.2
   - pybind11-global=2.10.4

@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "ripple-detection"
+version = "0.1.0"
+description = "ripple detection on iEEG data."
+authors = ["Xin Niu <michaelniki1988@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pandas = "2.2.1"
+numpy = "2.1.3"
+matplotlib = "3.10.0"
+scipy = "1.15.0"
+mat73 = "0.61"
+
+[tool.poetry.dev-dependencies]
+jupyterlab-widgets = "3.0.9"
+pytest = "8.3.1"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
