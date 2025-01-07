@@ -12,9 +12,9 @@ Activate environment:
 conda activate ripple-detection
 ```
 
-Sometimes we have problem installing library ptsa. We can build it from source instead. See instructions [here](https://github.com/pennmem/ptsa?tab=readme-ov-file#build-from-source).
+Sometimes, we have problems installing library `ptsa`. We can build it from the source instead. See instructions [here](https://github.com/pennmem/ptsa?tab=readme-ov-file#build-from-source).
 
-Then run the following the install additional libraries:
+Then run the following to install additional libraries:
 ```
-conda update -f environments.yml
+conda env update --file environment.yml --prune
 ```
