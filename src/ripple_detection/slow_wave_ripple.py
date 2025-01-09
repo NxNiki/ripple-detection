@@ -8,9 +8,9 @@ import functools
 import datetime
 import scipy
 
-from ptsa.data.filters import morlet
-from ptsa.data.filters import ButterworthFilter
-from general import *
+# from ptsa.data.filters import morlet
+# from ptsa.data.filters import ButterworthFilter
+from ripple_detection.general import *
 
 # all the unique sub names for FR tasks in df. Need fixed list so can do 40/60 data split
 # note that for FR1 this was before localization.pairs pipeline was added.
@@ -166,7 +166,7 @@ def getSplitDF(exp_df,sub_selection,exp,selected_period='surrounding_recall'):
             whole_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if sb in updated_sub_names_FR1]
             analysis_df = exp_df.iloc[whole_sub_idxs]            
         else:
-            from SWRmodule import original_sub_names_FR1 # all the unique sub names for FR1 task in df
+            from slow_wave_ripple import original_sub_names_FR1 # all the unique sub names for FR1 task in df
             proportion_subs = 0.5 # it's really 0.5 of initial pre-localization.pairs subs. So comes out to numbers above. And what we want to match for catFR1
             first_half_sub_names = np.random.permutation(np.unique(original_sub_names_FR1))[:int(np.floor(len(np.unique(original_sub_names_FR1))*proportion_subs))]
             if sub_selection == 'first_half':
@@ -179,15 +179,15 @@ def getSplitDF(exp_df,sub_selection,exp,selected_period='surrounding_recall'):
         np.random.seed(44455) # seed 44455 gives 20,393 of 50,053 recall trials (40.7%). Or 46/138 (33.3% of subs)
         if sub_selection == 'whole':
             if selected_period == 'encoding':
-                from SWRmodule import updated_sub_names_catFR1_encoding
+                from slow_wave_ripple import updated_sub_names_catFR1_encoding
                 updated_sub_names_catFR1 = updated_sub_names_catFR1_encoding
             else:
-                from SWRmodule import updated_sub_names_catFR1
+                from slow_wave_ripple import updated_sub_names_catFR1
             whole_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if sb in updated_sub_names_catFR1]
             analysis_df = exp_df.iloc[whole_sub_idxs]
         else:
-            from SWRmodule import original_sub_names_catFR1 # original unique sub names for catFR1 task in df when I did split
-            from SWRmodule import updated_sub_names_catFR1
+            from slow_wave_ripple import original_sub_names_catFR1 # original unique sub names for catFR1 task in df when I did split
+            from slow_wave_ripple import updated_sub_names_catFR1
             proportion_subs = 0.35 
             first_half_sub_names = np.random.permutation(np.unique(original_sub_names_catFR1))[:int(np.floor(len(np.unique(original_sub_names_catFR1))*proportion_subs))]
             if sub_selection == 'first_half':
@@ -1089,26 +1089,6 @@ def getBadChannels(tal_struct,elecs_cat,remove_soz_ictal):
             
     return bad_bp_mask
 
-# def getStartEndArrays(ripple_array):
-#     '''
-#     get separate arrays of SWR starts and SWR ends from the full binarized array
-#     '''
-    
-#     start_array = np.zeros((ripple_array.shape),dtype='uint8')
-#     end_array = np.zeros((ripple_array.shape),dtype='uint8')        
-    
-#     num_trials = ripple_array.shape[0]    
-#     for trial in range(num_trials):
-#         ripplelogictrial = ripple_array[trial]
-#         starts,ends = getLogicalChunks(ripplelogictrial)
-#         temp_row = np.zeros(len(ripplelogictrial))
-#         temp_row[starts] = 1
-#         start_array[trial] = temp_row # time when each SWR starts
-#         temp_row = np.zeros(len(ripplelogictrial))
-#         temp_row[ends] = 1
-#         end_array[trial] = temp_row
-#     return start_array,end_array
-
 def getStartEndArrays(ripple_array):
     '''
     Get separate arrays of SWR starts and SWR ends from the full binarized array
@@ -1128,19 +1108,19 @@ def getStartEndArrays(ripple_array):
     
     return start_array.astype('uint8'), end_array.astype('uint8')
 
-def detectRipplesHamming(eeg_rip,trans_width,sr,iedlogic):
-    
+def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
     '''
-    :param array eeg_rip: hilbert transformed ieeg data 
+    detect ripples similar to with Butterworth, but using Norman et al 2019 algo (based on Stark 2014 algo). Description:
+    Then Hilbert, clip extreme to 4 SD, square this clipped, smooth w/ Kaiser FIR low-pass filter with 40 Hz cutoff,
+    mean and SD computed across entire experimental duration to define the threshold for event detection
+    Events from original (squared but unclipped) signal >4 SD above baseline were selected as candidate SWR events.
+    Duration expanded until ripple power <2 SD. Events <20 ms or >200 ms excluded. Adjacent events <30 ms separation (peak-to-peak) merged.
+
+    :param array eeg_rip: hilbert transformed ieeg data
     '''
-    # detect ripples similar to with Butterworth, but using Norman et al 2019 algo (based on Stark 2014 algo). Description:
-#      Then Hilbert, clip extreme to 4 SD, square this clipped, smooth w/ Kaiser FIR low-pass filter with 40 Hz cutoff,
-#      mean and SD computed across entire experimental duration to define the threshold for event detection
-#      Events from original (squared but unclipped) signal >4 SD above baseline were selected as candidate SWR events. 
-#      Duration expanded until ripple power <2 SD. Events <20 ms or >200 ms excluded. Adjacent events <30 ms separation (peak-to-peak) merged.
+
     from scipy.signal import firwin,filtfilt,kaiserord,convolve2d
     
-
     candidate_SD = 3
     artifact_buffer = 100 # ms around IED events to remove SWRs
     sr_factor = 1000/sr
@@ -1155,7 +1135,7 @@ def detectRipplesHamming(eeg_rip,trans_width,sr,iedlogic):
     # FIR lowpass 40 hz filter for Norman dtection algo
     nyquist = sr/2
     ntaps40, beta40 = kaiserord(40, trans_width/nyquist)
-    kaiser_40lp_filter = firwin(ntaps40, cutoff=40, window=('kaiser', beta40), scale=False, nyq=nyquist, pass_zero='lowpass')
+    kaiser_40lp_filter = firwin(ntaps40, cutoff=40, window=('kaiser', beta40), scale=False, pass_zero='lowpass', fs=sr)
     
     eeg_rip = filtfilt(kaiser_40lp_filter,1.,eeg_rip)
     mean_detection_thresh = np.mean(eeg_rip)
@@ -1227,7 +1207,7 @@ def detectRipplesHamming(eeg_rip,trans_width,sr,iedlogic):
         ripplelogic[trial] = temp_trial # place it back in
     return ripplelogic
 
-def detectRipplesButter(eeg_rip,eeg_ied,eeg_mne,sr): #,mstimes):
+def detect_ripples_butter(eeg_rip,eeg_ied,eeg_mne,sr): #,mstimes):
     ## detect ripples ##
     # input: hilbert amp from 80-120 Hz, hilbert amp from 250-500 Hz, raw eeg. All trials X duration (ms),mstime of each FR event
     # output: ripplelogic and iedlogic, which are trials X duration masks of ripple presence 
@@ -1286,7 +1266,7 @@ def detectRipplesButter(eeg_rip,eeg_ied,eeg_mne,sr): #,mstimes):
     
     return ripplelogic,iedlogic #,ripple_mstimes
 
-def detectRipplesStaresina(eeg_rip,sr):
+def detect_ripples_staresina(eeg_rip, sr):
     # detect ripples using Staresina et al 2015 NatNeuro algo
     window_size = 20 # in ms
     min_duration = 38 # 38 ms

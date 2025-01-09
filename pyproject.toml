@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "ripple detection on iEEG data."
 authors = ["Xin Niu <michaelniki1988@gmail.com>"]
 
+packages = [
+    { include = "ripple_detection", from = "src" }
+]
+
 [tool.poetry.dependencies]
 python = ">=3.10,<3.11"
 pandas = "^2.2.1"
@@ -17,6 +21,7 @@ seaborn = "^0.13.2"
 
 [tool.poetry.dev-dependencies]
 jupyterlab-widgets = "3.0.9"
+jupyterlab = "4.3.2"
 pytest = "8.3.1"
 
 [build-system]
