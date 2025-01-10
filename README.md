@@ -23,7 +23,7 @@ conda env update --file environment.yml --prune
 
 ### Option 2. Use poetry to install packages and build `ptsa` from source
 
-Sometimes, we have problems installing library `ptsa`. We can build it from the source instead. See instructions [here](https://github.com/pennmem/ptsa?tab=readme-ov-file#build-from-source).
+Sometimes, we have problems installing library `ptsa`. We can build it from the source instead.
 
 First, create your virtual environment and activate it.
 
