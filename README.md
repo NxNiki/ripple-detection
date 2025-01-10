@@ -33,7 +33,7 @@ poetry install
 ```
 This will install libraries listed in `pyproject.toml`.
 
-To build `ptsa` from source, Download [ptsa] and follow [instructions](https://github.com/pennmem/ptsa?tab=readme-ov-file#build-from-source)
+To build `ptsa` from source, Download [ptsa](https://github.com/pennmem/ptsa) and follow [instructions](https://github.com/pennmem/ptsa?tab=readme-ov-file#build-from-source)
 
 If you get the error:
 ```
