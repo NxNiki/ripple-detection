@@ -33,7 +33,7 @@ poetry install
 ```
 This will install libraries listed in `pyproject.toml`.
 
-To build `ptsa` from source, See [this](https://github.com/pennmem/ptsa?tab=readme-ov-file#build-from-source)
+To build `ptsa` from source, Download [ptsa] and follow [instructions](https://github.com/pennmem/ptsa?tab=readme-ov-file#build-from-source)
 
 If you get the error:
 ```
@@ -50,4 +50,10 @@ And add the path of the library when building the package:
 python setup.py build_ext --library-dirs=$CONDA_PREFIX/lib --include-dirs=$CONDA_PREFIX/lib/include
 ```
 
-This is tested on MacOS with M1 chip.
+The above method only installs `ptsa` locally relative to the `ptsa` directly, which means you cannot import it in a different path. To install `ptsa` globally in your conda environment:
+
+```
+pip install .
+```
+
+This is tested on MacOS with an M1 chip.
