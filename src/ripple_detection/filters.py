@@ -12,7 +12,7 @@ import numpy.typing as npt
 from typing import List
 
 
-def butter_filter(dat: npt.NDArray, freq_range: List[int], sample_rate: int, filter_type: str, order: int, axis: int=-1):
+def butter_filter(dat: npt.NDArray, freq_range: List[float], sample_rate: int, filter_type: str, order: int, axis: int=-1):
     """Wrapper for a Butterworth filter.
 
     """
