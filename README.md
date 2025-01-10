@@ -27,3 +27,14 @@ If you install `ptsa` from the source, then use poetry to install the remaining 
 poetry install
 ```
 This will install libraries listed in `pyproject.toml`.
+
+For ptsa, you may need to build it from source, See [this](https://github.com/pennmem/ptsa?tab=readme-ov-file#build-from-source)
+
+If you get the error:
+```
+ld: library not found for -lfftw3
+```
+Make sure you have library lfft installed and add the path of the library:
+```
+python setup.py build_ext --library-dirs=$CONDA_PREFIX/lib --include-dirs=$CONDA_PREFIX/lib/include
+```
