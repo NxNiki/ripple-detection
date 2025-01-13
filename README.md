@@ -27,7 +27,7 @@ Sometimes, we have problems installing library `ptsa`. We can build it from the 
 
 First, create your virtual environment and activate it.
 
-Then use poetry to install the remaining requirements:
+Then use poetry to install the remaining requirements (run command in the root directory of the repo):
 ```
 poetry install
 ```
