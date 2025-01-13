@@ -1,4 +1,0 @@
-test/data/LA1.ncs filter=lfs diff=lfs merge=lfs -text
-test/data/LA2.ncs filter=lfs diff=lfs merge=lfs -text
-test/data/LAH1.ncs filter=lfs diff=lfs merge=lfs -text
-test/data/LAH2.ncs filter=lfs diff=lfs merge=lfs -text
