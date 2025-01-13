@@ -9,11 +9,14 @@ from scipy import stats
 from scipy.stats import zscore
 import pickle
 
-from scipy import stats,signal,io
+from scipy import stats, signal, io
 import time
 import mat73
 import mne
+from ptsa.data.filters import ButterworthFilter, ResampleFilter, MorletWaveletFilter
 from scipy.signal import firwin, filtfilt, kaiserord
+from ptsa.data.timeseries import TimeSeries
+
 from ripple_detection.general import superVstack
 from ripple_detection.slow_wave_ripple import (
     detect_ripples_hamming, detect_ripples_butter, detect_ripples_staresina,
@@ -58,9 +61,17 @@ sr = int(macro_ncs1['header']['SamplingFrequency'])
 print(f'macro_data shape: {np.shape(macro_data)}')
 print(f'sr: {sr}')
 
-# power line removal...don't do 120 for now (I never see any line noise there for whatever reason)
-macro_data = butter_filter(macro_data, freq_range=[58, 62], sample_rate=sr, filter_type='stop', order=4)
-macro_data = butter_filter(macro_data, freq_range=[178, 182], sample_rate=sr, filter_type='stop', order=4)
+time_in_sec = np.linspace(1, np.shape(macro_data)[2], np.shape(macro_data)[2]) / sr
+eeg_ptsa = TimeSeries(macro_data,
+                dims=('event','channel', 'time'),
+                coords={'event':[0], # so can keep it 3d
+                        'channel':np.arange(np.shape(macro_data)[1]),
+                        'time':time_in_sec,
+                        'samplerate':sr})
+
+# line removal...don't do 120 for now (I never see any line noise there for whatever reason)
+macro_data = ButterworthFilter(freq_range=[58., 62.], filt_type='stop', order=4).filter(timeseries=eeg_ptsa)
+macro_data = ButterworthFilter(freq_range=[178., 182.], filt_type='stop', order=4).filter(timeseries=eeg_ptsa)
 
 trans_width = 5. # Width of transition region, normalized so that 1 corresponds to pi radians/sample.
 # That is, the frequency is expressed as a fraction of the Nyquist frequency.
