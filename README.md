@@ -3,9 +3,16 @@
 ## environment set up
 
 > [!NOTE]
-> Some packages like `_libgcc_mutex`, `_openmp_mutex`, and `ld_impl_linux-64` are Linux-specific and cannot be installed on macOS with M1 chip.
+> Some packages like `_libgcc_mutex`, `_openmp_mutex`, and `ld_impl_linux-64` are Linux-specific and maynot be installed on macOS with M1 chip. John reports successful installation on an M2 chip.
 
 ### Option 1. Create an environment directly with conda
+
+If you are on SEG login node, there could be memory issue. Request an interactive computing node:
+
+```
+qlogin -l h_vmem=16G -l mem_free=16G
+```
+
 First setup your conda environment:
 ```
 conda env create -f environments.yml
