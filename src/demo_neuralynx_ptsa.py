@@ -20,7 +20,7 @@ from ptsa.data.timeseries import TimeSeries
 from ripple_detection.general import superVstack
 from ripple_detection.slow_wave_ripple import (
     detect_ripples_hamming, detect_ripples_butter, detect_ripples_staresina,
-    downsampleBinary, getStartEndArrays
+    downsample_binary, getStartEndArrays
 )
 from ripple_detection.neuralynx_io import load_ncs
 from ripple_detection.filters import butter_filter
@@ -151,7 +151,7 @@ for channel in range(np.shape(eeg_rip_band.get_data())[1]):  # unpack number of 
         desired_sample_rate = 1000  # for Vaz algo
 
     if sr > desired_sample_rate:  # downsampling here for anything greater than 500 (hamming) or 1000 (butter)
-        ripplelogic = downsampleBinary(ripplelogic, sr / desired_sample_rate)
+        ripplelogic = downsample_binary(ripplelogic, sr / desired_sample_rate)
 
     # ripples are detected, so can remove buffers now #
     # if ripplelogic is just 1d (because it only has 1 "trial") it bugs out programs below
@@ -171,8 +171,8 @@ for channel in range(np.shape(eeg_rip_band.get_data())[1]):  # unpack number of 
 
         # check the ripples for this electrode and make sure they're not super correlated across trials
     # first, bin the array so can get more realistic correlation not dependent on ms timing
-    binned_ripplelogic = downsampleBinary(ripplelogic[:, :ripplelogic.size - ripplelogic.size % 10],
-                                          10)  # downsample by 10x so 10 ms bins
+    binned_ripplelogic = downsample_binary(ripplelogic[:, :ripplelogic.size - ripplelogic.size % 10],
+                                           10)  # downsample by 10x so 10 ms bins
     trial_ripple_df = pd.DataFrame(data=np.transpose(binned_ripplelogic))
     num_cols = len(list(trial_ripple_df))
     temp_tbt_corr = 0

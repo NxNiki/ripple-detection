@@ -1171,7 +1171,7 @@ def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
                 if (end+current_time)==trial_length-1:
                     break
                 else:
-                    current_time +=1
+                    current_time += 1
             ends[i] = end+current_time
             
         # remove any duplicates from starts and ends
@@ -1207,7 +1207,8 @@ def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
         ripplelogic[trial] = temp_trial # place it back in
     return ripplelogic
 
-def detect_ripples_butter(eeg_rip,eeg_ied,eeg_mne,sr): #,mstimes):
+
+def detect_ripples_butter(eeg_rip, eeg_ied, eeg_mne, sr):  # ,mstimes):
     ## detect ripples ##
     # input: hilbert amp from 80-120 Hz, hilbert amp from 250-500 Hz, raw eeg. All trials X duration (ms),mstime of each FR event
     # output: ripplelogic and iedlogic, which are trials X duration masks of ripple presence 
@@ -1264,7 +1265,8 @@ def detect_ripples_butter(eeg_rip,eeg_ied,eeg_mne,sr): #,mstimes):
                 ripplelogictrial[ends[ripple]+1:starts[ripple+1]] = 1
         ripplelogic[trial] = ripplelogictrial # reassign trial with ripples removed      
     
-    return ripplelogic,iedlogic #,ripple_mstimes
+    return ripplelogic,iedlogic  # ripple_mstimes
+
 
 def detect_ripples_staresina(eeg_rip, sr):
     # detect ripples using Staresina et al 2015 NatNeuro algo
@@ -1279,9 +1281,9 @@ def detect_ripples_staresina(eeg_rip, sr):
     # get rms for 20 ms moving avg across all trials (confirmed this conv method is same as moving window)
     for eeg_tr in rip2:
         # from https://stackoverflow.com/questions/8245687/numpy-root-mean-squared-rms-smoothing-of-a-signal
-        rms_values.append(np.sqrt(np.convolve(eeg_tr, window, 'same'))) # same means it pads at ends, but doesn't matter with buffers anyway
-    rms_thresh = np.percentile(rms_values,99) # 99th %ile threshold
-    binary_array = rms_values>=rms_thresh 
+        rms_values.append(np.sqrt(np.convolve(eeg_tr, window, 'same')))  # same means it pads at ends, but doesn't matter with buffers anyway
+    rms_thresh = np.percentile(rms_values, 99)  # 99th %ile threshold
+    binary_array = rms_values >= rms_thresh
 
     # now find those with minimum duration between start/end for each trial and if they have 3 peaks/troughs keep them
 
@@ -1302,30 +1304,32 @@ def detect_ripples_staresina(eeg_rip, sr):
                 ripplelogic[i_trial,starts[i_cand]:ends[i_cand]] = 1
     return ripplelogic
 
-def downsampleBinary(array,factor):
+
+def downsample_binary(array, factor):
     # input should be trial X time binary matrix
     array_save = np.array([])
-    if factor-int(factor)==0: # if an integer
-        for t in range(array.shape[0]): #from https://stackoverflow.com/questions/20322079/downsample-a-1d-numpy-array
-            array_save = superVstack(array_save,array[t].reshape(-1,int(factor)).mean(axis=1))
+    if factor-int(factor) == 0:  # if an integer
+        for t in range(array.shape[0]):  # from https://stackoverflow.com/questions/20322079/downsample-a-1d-numpy-array
+            array_save = superVstack(array_save, array[t].reshape(-1, int(factor)).mean(axis=1))
     else:
         # when dividing by non-integer, can just use FFT and round to get new sampling
         from scipy.signal import resample
-        if array.shape[1]/factor-int(array.shape[1]/factor)!=0:
-            print('Did not get whole number array for downsampling...rounding to nearest 100')
-        new_sampling = int( round((array.shape[1]/factor)/100) )*100
+        if array.shape[1]/factor-int(array.shape[1]/factor) != 0:
+            print('Did not get whole number array for down sampling...rounding to nearest 100')
+        new_sampling = int(round((array.shape[1]/factor)/100))*100
         for t in range(array.shape[0]):
             array_save = superVstack(array_save,np.round(resample(array[t],new_sampling)))
     return array_save
 
-def ptsa_to_mne(eegs,time_length): # in ms
+
+def ptsa_to_mne(eegs, time_length):  # in ms
     # convert ptsa to mne    
     import mne
 
-    sr = int(np.round(eegs.samplerate)) #get samplerate...round 1st since get like 499.7 sometimes  
+    sr = int(np.round(eegs.samplerate))  # get samplerate...round 1st since get like 499.7 sometimes
     eegs = eegs[:, :, :].transpose('event', 'channel', 'time') # make sure right order of names
 
-    time = [x/1000 for x in time_length] # convert to s for MNE
+    time = [x/1000 for x in time_length]  # convert to s for MNE
     clips = np.array(eegs[:, :, int(np.round(sr*time[0])):int(np.round(sr*time[1]))])
     mne_evs = np.empty([clips.shape[0], 3]).astype(int)
     mne_evs[:, 0] = np.arange(clips.shape[0]) # at each timepoint
@@ -1337,6 +1341,7 @@ def ptsa_to_mne(eegs,time_length): # in ms
     
     arr = mne.EpochsArray(np.array(clips), info, mne_evs, tmin, event_id, verbose=False)
     return arr
+
 
 def fastSmooth(a,window_size): # I ended up not using this one. It's what Norman/Malach use (a python
      # implementation of matlab nanfastsmooth, but isn't actually triangular like it says in paper)
