@@ -57,7 +57,7 @@ And add the path of the library when building the package:
 python setup.py build_ext --library-dirs=$CONDA_PREFIX/lib --include-dirs=$CONDA_PREFIX/lib/include
 ```
 
-The above method only installs `ptsa` locally relative to the `ptsa` directly, which means you cannot import it in a different path. To install `ptsa` globally in your conda environment:
+The above method only installs `ptsa` locally in the `ptsa` directory, which means you cannot import it from a different path. To install `ptsa` globally in your conda environment:
 
 ```
 pip install .
