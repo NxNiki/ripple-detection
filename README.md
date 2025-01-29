@@ -3,7 +3,7 @@
 ## environment set up
 
 > [!NOTE]
-> Some packages like `_libgcc_mutex`, `_openmp_mutex`, and `ld_impl_linux-64` are Linux-specific and maynot be installed on macOS with M1 chip. John reports successful installation on an M2 chip.
+> Some packages like `_libgcc_mutex`, `_openmp_mutex`, and `ld_impl_linux-64` are Linux-specific and maynot be installed on macOS with M1 chip. John reports successful installation on an M2 chip, probably with a x86_64 Conda environment on macOS under Rosetta 2
 
 ### Option 1. Create an environment directly with conda
 
