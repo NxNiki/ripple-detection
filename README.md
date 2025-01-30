@@ -47,6 +47,15 @@ If python does not point to the virtual environment:
 ```
 One reason could be a different version of python is loaded when you start your terminal. Check your `~/.bashrc` to see if the default python is loaded.
 
+
+You may also want to setup a separate jupyter kernel so that you can select on jupyter notebook or vsstudio:
+
+```
+python -m ipykernel install --user --name ripple-detection --display-name "ripple-detection"
+```
+
+Or you can activate the virtual environment and start jupyter-notebook.
+
 If you are on SEG login node, there could be memory issue. Request an interactive computing node:
 
 ```
