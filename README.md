@@ -7,11 +7,6 @@
 
 ### Option 1. Create an environment directly with conda
 
-If you are on SEG login node, there could be memory issue. Request an interactive computing node:
-
-```
-qlogin -l h_vmem=16G -l mem_free=16G
-```
 
 First setup your conda environment:
 ```
@@ -27,6 +22,38 @@ When you modify `environments.yml`, run the following command to update the envi
 ```
 conda env update --file environment.yml --prune
 ```
+
+### Set up environments on SGE server:
+
+On Hoffman2, conda is already installed, which can be loaded by
+```
+module load conda
+```
+
+Then, create the environment:
+```
+conda env create -f environments.yml
+conda activate ripple-detection
+```
+
+Make sure the conda environment is setup correctly:
+```
+which python
+```
+
+If python does not point to the virtual environment:
+```
+~/.conda/envs/ripple-detection/bin/python
+```
+One reason could be a different version of python is loaded when you start your terminal. Check your `~/.bashrc` to see if the default python is loaded.
+
+If you are on SEG login node, there could be memory issue. Request an interactive computing node:
+
+```
+qlogin -l h_vmem=16G -l mem_free=16G
+```
+
+
 
 ### Option 2. Use poetry to install packages and build `ptsa` from source
 
