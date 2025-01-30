@@ -155,9 +155,6 @@ def getSplitDF(exp_df,sub_selection,exp,selected_period='surrounding_recall'):
     #     print(seed); ripple_array = []; sub_names = []
 
     first_half_sub_names = []
-    
-    print(exp)
-    
     if exp == 'FR1':
         np.random.seed(44462) # seed 44462 gives 25,845 of 60,417 recall trials (42.8%). Or 57/167 (34.1% of subs)
         # subject numbers via len(np.unique(subject_name_array)) after loading half_df or exp_df
@@ -174,9 +171,9 @@ def getSplitDF(exp_df,sub_selection,exp,selected_period='surrounding_recall'):
             else:
                 half_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if sb not in first_half_sub_names]
             analysis_df = exp_df.iloc[half_sub_idxs]
-            
     elif exp == 'catFR1':
         np.random.seed(44455) # seed 44455 gives 20,393 of 50,053 recall trials (40.7%). Or 46/138 (33.3% of subs)
+        
         if sub_selection == 'whole':
             if selected_period == 'encoding':
                 from SWRmodule import updated_sub_names_catFR1_encoding
@@ -199,6 +196,10 @@ def getSplitDF(exp_df,sub_selection,exp,selected_period='surrounding_recall'):
     
     elif exp == 'RepFR1':
         analysis_df = exp_df
+        
+    # visually check to make sure you're selecting right patients
+    print(first_half_sub_names[:10]) # catFR1 first 10 starts with R1393T
+    print(first_half_sub_names[-10:]) # catFR1 last 10 starts with R1386T
             
     return analysis_df
 
@@ -245,9 +246,7 @@ def normFFT(eeg):
 #     return HPC_labels,ENT_labels,PHC_labels    
 
 def getSWRpathInfo(remove_soz_ictal,recall_type_switch,selected_period,recall_minimum):
-    '''
-    get strings for path name for save and loading cluster data
-    '''
+    # get strings for path name for save and loading cluster data
     if remove_soz_ictal == 0:
         soz_label = 'soz_in'
     elif remove_soz_ictal == 1:
@@ -628,14 +627,11 @@ def get_recall_clustering(recall_cluster_values, recalls_serial_pos):
                     dists.append(np.nan)
             dists = np.array(dists)
             dists = dists[np.isfinite(dists)]
-            true_trans = euclidean(np.atleast_1d(recall_cluster_values[recalls_serial_pos[ridx]]), 
-                       np.atleast_1d(recall_cluster_values[recalls_serial_pos[ridx+1]]))
-
+            true_trans = euclidean(recall_cluster_values[recalls_serial_pos[ridx]], recall_cluster_values[recalls_serial_pos[ridx+1]])
         
             # remove the actual transition from the denominator to scale from 0 to 1 (see Manning 2011 PNAS)
             test_dists = list(dists)
-            if true_trans in test_dists:
-                test_dists.remove(true_trans) # Ethan didn't do this either
+            test_dists.remove(true_trans) # Ethan didn't do this either
 
             # can only get 1.0 or 0.0 transition if transitioning from first or last word using 'mean' but how Manning 2011 does it
             pctrank = 1.-percentileofscore(test_dists, true_trans, kind='mean')/100. # 'mean' as in PYBEH temp_fact. Ethan used 'strict'
@@ -1089,50 +1085,24 @@ def getBadChannels(tal_struct,elecs_cat,remove_soz_ictal):
             
     return bad_bp_mask
 
-# def getStartEndArrays(ripple_array):
-#     '''
-#     get separate arrays of SWR starts and SWR ends from the full binarized array
-#     '''
-    
-#     start_array = np.zeros((ripple_array.shape),dtype='uint8')
-#     end_array = np.zeros((ripple_array.shape),dtype='uint8')        
-    
-#     num_trials = ripple_array.shape[0]    
-#     for trial in range(num_trials):
-#         ripplelogictrial = ripple_array[trial]
-#         starts,ends = getLogicalChunks(ripplelogictrial)
-#         temp_row = np.zeros(len(ripplelogictrial))
-#         temp_row[starts] = 1
-#         start_array[trial] = temp_row # time when each SWR starts
-#         temp_row = np.zeros(len(ripplelogictrial))
-#         temp_row[ends] = 1
-#         end_array[trial] = temp_row
-#     return start_array,end_array
-
 def getStartEndArrays(ripple_array):
-    '''
-    Get separate arrays of SWR starts and SWR ends from the full binarized array
-    '''
+    # get separate arrays of SWR starts and SWR ends from the full binarized array
+    start_array = np.zeros((ripple_array.shape),dtype='uint8')
+    end_array = np.zeros((ripple_array.shape),dtype='uint8')        
     
-    # Shift the ripple array to the right and left by one position
-    shifted_right = np.roll(ripple_array, shift=1, axis=1)
-    shifted_left = np.roll(ripple_array, shift=-1, axis=1)
-    
-    # Find the start by looking for a transition from 0 to 1
-    start_array = (ripple_array == 1) & (shifted_right == 0)
-    start_array[:, 0] = ripple_array[:, 0]  # Handle the edge case for the first column
-    
-    # Find the end by looking for a transition from 1 to 0
-    end_array = (ripple_array == 1) & (shifted_left == 0)
-    end_array[:, -1] = ripple_array[:, -1]  # Handle the edge case for the last column
-    
-    return start_array.astype('uint8'), end_array.astype('uint8')
+    num_trials = ripple_array.shape[0]    
+    for trial in range(num_trials):
+        ripplelogictrial = ripple_array[trial]
+        starts,ends = getLogicalChunks(ripplelogictrial)
+        temp_row = np.zeros(len(ripplelogictrial))
+        temp_row[starts] = 1
+        start_array[trial] = temp_row # time when each SWR starts
+        temp_row = np.zeros(len(ripplelogictrial))
+        temp_row[ends] = 1
+        end_array[trial] = temp_row
+    return start_array,end_array
 
 def detectRipplesHamming(eeg_rip,trans_width,sr,iedlogic):
-    
-    '''
-    :param array eeg_rip: hilbert transformed ieeg data 
-    '''
     # detect ripples similar to with Butterworth, but using Norman et al 2019 algo (based on Stark 2014 algo). Description:
 #      Then Hilbert, clip extreme to 4 SD, square this clipped, smooth w/ Kaiser FIR low-pass filter with 40 Hz cutoff,
 #      mean and SD computed across entire experimental duration to define the threshold for event detection
@@ -1140,7 +1110,6 @@ def detectRipplesHamming(eeg_rip,trans_width,sr,iedlogic):
 #      Duration expanded until ripple power <2 SD. Events <20 ms or >200 ms excluded. Adjacent events <30 ms separation (peak-to-peak) merged.
     from scipy.signal import firwin,filtfilt,kaiserord,convolve2d
     
-
     candidate_SD = 3
     artifact_buffer = 100 # ms around IED events to remove SWRs
     sr_factor = 1000/sr
@@ -1165,10 +1134,10 @@ def detectRipplesHamming(eeg_rip,trans_width,sr,iedlogic):
     orig_eeg_rip = orig_eeg_rip**2
     candidate_thresh = mean_detection_thresh+candidate_SD*std_detection_thresh
     expansion_thresh = mean_detection_thresh+2*std_detection_thresh
-    ripplelogic = orig_eeg_rip >= candidate_thresh # EF1208, will evaluate to squared signal is above threshold
+    ripplelogic = orig_eeg_rip >= candidate_thresh
     # remove IEDs detected from Norman 25-60 algo...maybe should do this after expansion to 2SD??
     iedlogic = convolve2d(iedlogic,np.ones((1,artifact_buffer)),'same')>0 # expand to +/- 50 ms from each ied point
-    ripplelogic[iedlogic==1] = 0 # EF1208, convert above threshold events to 0 if they are an IED
+    ripplelogic[iedlogic==1] = 0 
     
     # expand out to 2SD around surviving events
     num_trials = ripplelogic.shape[0]
@@ -1408,13 +1377,12 @@ def fullPSTH(point_array,binsize,smoothing_triangle,sr,start_offset):
     bin_centers = edges[0:-1]+binsize/2+start_offset
 
     count = np.histogram(xtimes,bins=edges);
-    norm_count = count[0]/np.array((num_trials*binsize/1000))
-
+    norm_count = count/np.array((num_trials*binsize/1000))
     #smoothed = fastSmooth(norm_count[0],5) # use triangular instead, although this gives similar answer
     if smoothing_triangle==1:
-        PSTH = norm_count
+        PSTH = norm_count[0]
     else:
-        PSTH = triangleSmooth(norm_count,smoothing_triangle)
+        PSTH = triangleSmooth(norm_count[0],smoothing_triangle)
     return PSTH,bin_centers
 
 def binBinaryArray(start_array,bin_size,sr_factor):
@@ -1427,25 +1395,25 @@ def binBinaryArray(start_array,bin_size,sr_factor):
         bin_to_hz = 1000/bin_size*bin_in_sr # factor that converts binned matrix to Hz
     else:
         bin_to_hz = 1
-    binned_array = np.zeros((start_array.shape[0], num_bins))
-    # note this will be at instantaeous rate bin_in_sr multiple lower (e.g. 100 ms bin/2 sr = 50x)
+    
+    binned_array = [] # note this will be at instantaeous rate bin_in_sr multiple lower (e.g. 100 ms bin/2 sr = 50x)
 
-    for i, row in enumerate(start_array):
-        for j, start in enumerate(bins[:-1]):
-            binned_array[i, j] = bin_to_hz * np.mean(row[int(start):int(start + bin_in_sr)])
-
+    for row in start_array:
+        temp_row = []
+        for time_bin in bins:
+            temp_row.append(bin_to_hz*np.mean(row[int(time_bin):int(time_bin+bin_in_sr)]))
+        binned_array = superVstack(binned_array,temp_row)
     return binned_array
 
 def getSubSessPredictors(sub_names,sub_sess_names,trial_nums,electrode_labels,channel_coords):
-    '''
-     get arrays of predictors for each trial so can set up ME model
-    2020-08-31 get electrode labels too
-    '''
+    # get arrays of predictors for each trial so can set up ME model
+    # 2020-08-31 get electrode labels too
     
     subject_name_array = []
     session_name_array = []
     electrode_array = []
     channel_coords_array = []
+
     trial_ct = 0
     for ct,subject in enumerate(sub_names):    
         trials_this_loop = int(trial_nums[ct])
@@ -1458,11 +1426,9 @@ def getSubSessPredictors(sub_names,sub_sess_names,trial_nums,electrode_labels,ch
         
     return subject_name_array,session_name_array,electrode_array,channel_coords_array
 
-def getSubSessPredictorsWithChannelNums(sub_names,sub_sess_names,trial_nums,electrode_labels,channel_coords,
-                                        channel_nums=[]):
+def getSubSessPredictorsWithChannelNums(sub_names,sub_sess_names,trial_nums,electrode_labels,channel_coords,channel_nums):
     # get arrays of predictors for each trial so can set up ME model
     # 2020-08-31 get electrode labels too
-    # EF1208, I'm modifying this function so we don't need the non channel nums version 
     
     subject_name_array = []
     session_name_array = []
@@ -1479,8 +1445,7 @@ def getSubSessPredictorsWithChannelNums(sub_names,sub_sess_names,trial_nums,elec
         session_name_array.extend(np.tile(sub_sess_names[ct],trials_this_loop))
         electrode_array.extend(np.tile(electrode_labels[ct],trials_this_loop))
         channel_coords_array.extend(np.tile(channel_coords[ct],(trials_this_loop,1))) # have to tile trials X 1 or it extends into a vector
-        if len(channel_nums) > 0: 
-            channel_nums_array.extend(np.tile(channel_nums[ct],trials_this_loop))
+        channel_nums_array.extend(np.tile(channel_nums[ct],trials_this_loop))
         
     return subject_name_array,session_name_array,electrode_array,channel_coords_array,channel_nums_array
 
@@ -1496,7 +1461,7 @@ def getMixedEffectCIs(binned_start_array,subject_name_array,session_name_array):
         ripple_rates = binned_start_array[:,time_bin]
         CI_df = pd.DataFrame(data={'session':session_name_array,'subject':subject_name_array,'ripple_rates':ripple_rates})
         # now get the CIs JUST for this time bin
-        vc = {'session':'0+session'} # EF1208, adding 0+ excludes random intercept 
+        vc = {'session':'0+session'}
         get_bin_CI_model = smf.mixedlm("ripple_rates ~ 1", CI_df, groups="subject", vc_formula=vc)
         bin_model = get_bin_CI_model.fit(reml=False, method='nm',maxiter=2000)
         mean_values.append(bin_model.params.Intercept)
@@ -2090,25 +2055,12 @@ def SubjectStatTable(subjects):
         table += '\\end{tabular}\n'
     except Exception as e:
         print (table)
-        
+        raise
     
     return table  
 
-def get_power(eeg, tstart, tend, freqs=[5,8]):
-
-    eeg = eeg.resample(500)  #downsample to ___ Hz
-
-    #Use MNE to get multitaper power in theta and HFA bands
-    from mne.time_frequency import psd_multitaper
-    theta_pow, fdone = psd_multitaper(eeg, fmin=freqs[0], fmax=freqs[1], tmin=tstart, 
-                                      tmax=tend, verbose=False)  #power is (events, elecs, freqs)
-    theta_pow_avg = np.mean(theta_pow, -1)  #Average across freq_bands
-    return theta_pow_avg.squeeze(), fdone
-
-def ClusterRun(function, parameter_list, max_cores=1000):
-
-    '''
-    function: The routine run in parallel, which must contain all necessary
+def ClusterRun(function, parameter_list, max_cores=300):
+    '''function: The routine run in parallel, which must contain all necessary
        imports internally.
     
        parameter_list: should be an iterable of elements, for which each element
@@ -2124,7 +2076,6 @@ def ClusterRun(function, parameter_list, max_cores=1000):
        Undesired running jobs can be killed by reading the JOBID at the left
        of that qstat command, then doing:  qdel JOBID
     '''
-
     import cluster_helper.cluster
     from pathlib import Path
 
@@ -2138,7 +2089,7 @@ def ClusterRun(function, parameter_list, max_cores=1000):
     # so like 2 and 50 instead of 1 and 100 etc. Went up to 5/20 for encoding at points
     # ...actually now went up to 10/10 which seems to stop memory errors 2020-08-12
     with cluster_helper.cluster.cluster_view(scheduler="sge", queue="RAM.q", \
-        num_jobs=5, cores_per_job=10, \
+        num_jobs=5, cores_per_job=50, \
         extra_params={'resources':'pename=python-round-robin'}, \
         profile=myhomedir + '/.ipython/') \
         as view:
@@ -2146,6 +2097,7 @@ def ClusterRun(function, parameter_list, max_cores=1000):
         res = view.map(function, parameter_list)
         
     return res
+  
 # 20 cores_per_job is enough for catFR1 SWRclustering. 7 missed 5-10
 # AMY encoding and surrounding_recall no issues with 10 cores/job
 # 10 works for ENTPHC with encoding
@@ -2153,65 +2105,3 @@ def ClusterRun(function, parameter_list, max_cores=1000):
 # 30 works for most of FR1 encoding...40 works for all
 # 25 didn't work for a few...made a list of the 15 or so in SWRanalysis 2022-03-09
 # 25 didn't work for a few catFR1 too. Made list of 20 and will try running with 50 cores/job
-
-def z_score_epochs(power):
-    # power should be a 3d array of shape num_trials x num_channels x num_timesteps
-    return (power - np.mean(power, axis=(0,2), keepdims=True)) / np.std(np.mean(power, axis=2, keepdims=True),axis=0, keepdims=True) 
- 
-def compute_morlet(eeg, freqs, sr, desired_sr, n_jobs, tmin, tmax, mode='power', split_power_idx=None):
-    
-    '''
-    
-    :param mne array eeg: eeg data 
-    :param ndarray freqs: frequencies to compute morlet wavelets over
-    :param int sr: sampling rate of eeg data
-    :param int desired_sr: desired sr of power/phase data
-    :param int n_jobs: how many threads to run on
-    :param float tmin, tmax: where to select signal from (to remove buffer), in ms
-    :param str mode: power or phase
-    :param int/None split_power_idx: compute two freq bands, return both and their union
-    if int this is where freqs is divided
-    
-    '''
-    
-    from mne.time_frequency import tfr_morlet
-    from mne.filter import resample
-    morlet_output = tfr_morlet(eeg, freqs, n_cycles=5, return_itc=False, average=False, n_jobs=n_jobs, output=mode)
-    
-    morlet_output.crop(tmin=tmin/1000, tmax=tmax/1000, include_tmax=False) # crop out the buffer 
-    
-    if mode == 'power':
-        
-        # log transform, mean across wavelet frequencies, and z-score
-        #morlet_output.data = np.log10(morlet_output.data)
-        
-        # split frequency bands into two groups 
-        if split_power_idx is not None:
-            morlet_output_data_1 = np.mean(morlet_output.data[:, :, :split_power_idx], axis=2)
-            morlet_output_data_2 = np.mean(morlet_output.data[:, :, split_power_idx:], axis=2)
-            
-        morlet_output.data = np.mean(morlet_output.data, axis=2)
-        
-    if mode == 'phase':
-        # take circular mean across wavelet phase values
-        morlet_output.data = scipy.stats.circmean(morlet_output.data, high=np.pi, low=-np.pi, axis=2)
-        
-    if sr > desired_sr: 
-      
-        morlet_output.data = resample(morlet_output.data, down=sr/desired_sr)
-        
-        if split_power_idx is not None: 
-            
-            morlet_output_data_1 = resample(morlet_output_data_1, down=sr/desired_sr)
-            morlet_output_data_2 = resample(morlet_output_data_2, down=sr/desired_sr)
-    
-    if split_power_idx is not None:
-        return morlet_output.data, morlet_output_data_1, morlet_output_data_2
-        
-    else: 
-        return morlet_output.data
-    
-    
-    
-    
-    
