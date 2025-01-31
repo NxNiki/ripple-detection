@@ -200,7 +200,7 @@ fileDeleter("/home1/john/thetaBurst/code/","sge_controller")
 fileDeleter("/home1/john/thetaBurst/code/","bcbio-e")
 '''
 
-def getLogicalChunks(array):
+def get_logical_chunks(array):
     # find start and end indices for chunks of values >0 in an array
     foundstart = False
     foundend = False

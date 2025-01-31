@@ -1,3 +1,5 @@
+import traceback
+
 import pandas as pd
 import numpy as np
 import sys
@@ -7,642 +9,53 @@ from copy import copy
 import functools
 import datetime
 import scipy
+from scipy.signal import firwin, filtfilt, kaiserord, convolve2d
 
 # from ptsa.data.filters import morlet
 # from ptsa.data.filters import ButterworthFilter
-from ripple_detection.general import *
-
-# all the unique sub names for FR tasks in df. Need fixed list so can do 40/60 data split
-# note that for FR1 this was before localization.pairs pipeline was added.
-# catFR1 this was after localizations.pairs pipeline was added.
-# comes from np.unique(sub_names) after loading all HPC recall data from exp_df.
-# NOTE: DON'T ALTER THESE since the 40/60 split is based on these names and order...
-#       ...but to get the number of subject names be sure to do len(sub_names) after loading cluster data
-original_sub_names_FR1 = ['R1001P', 'R1002P', 'R1003P', 'R1006P', 'R1010J', 'R1020J',
-       'R1022J', 'R1027J', 'R1032D', 'R1033D', 'R1034D', 'R1035M',
-       'R1044J', 'R1045E', 'R1048E', 'R1049J', 'R1052E', 'R1054J',
-       'R1056M', 'R1059J', 'R1061T', 'R1063C', 'R1065J', 'R1066P',
-       'R1067P', 'R1068J', 'R1077T', 'R1080E', 'R1083J', 'R1089P',
-       'R1092J', 'R1094T', 'R1096E', 'R1101T', 'R1102P', 'R1104D',
-       'R1105E', 'R1108J', 'R1112M', 'R1113T', 'R1115T', 'R1120E',
-       'R1122E', 'R1123C', 'R1125T', 'R1128E', 'R1131M', 'R1134T',
-       'R1136N', 'R1137E', 'R1138T', 'R1147P', 'R1150J', 'R1151E',
-       'R1154D', 'R1158T', 'R1159P', 'R1161E', 'R1162N', 'R1163T',
-       'R1167M', 'R1168T', 'R1171M', 'R1172E', 'R1174T', 'R1176M',
-       'R1191J', 'R1195E', 'R1200T', 'R1203T', 'R1204T', 'R1212P',
-       'R1215M', 'R1217T', 'R1221P', 'R1229M', 'R1230J', 'R1236J',
-       'R1241J', 'R1243T', 'R1260D', 'R1268T', 'R1275D', 'R1281E',
-       'R1283T', 'R1288P', 'R1292E', 'R1293P', 'R1297T', 'R1298E',
-       'R1299T', 'R1306E', 'R1308T', 'R1310J', 'R1311T', 'R1313J',
-       'R1315T', 'R1316T', 'R1320D', 'R1323T', 'R1325C', 'R1328E',
-       'R1330D', 'R1332M', 'R1334T', 'R1336T', 'R1338T', 'R1339D',
-       'R1341T', 'R1342M', 'R1346T', 'R1349T', 'R1350D', 'R1374T',
-       'R1397D']
-original_sub_names_catFR1 = ['R1004D', 'R1015J', 'R1024E', 'R1032D', 'R1035M', 'R1045E',
-       'R1056M', 'R1061T', 'R1065J', 'R1066P', 'R1067P', 'R1083J',
-       'R1086M', 'R1089P', 'R1092J', 'R1094T', 'R1102P', 'R1105E',
-       'R1108J', 'R1112M', 'R1131M', 'R1138T', 'R1144E', 'R1147P',
-       'R1157C', 'R1158T', 'R1163T', 'R1167M', 'R1171M', 'R1174T',
-       'R1176M', 'R1180C', 'R1188C', 'R1190P', 'R1192C', 'R1204T',
-       'R1207J', 'R1217T', 'R1221P', 'R1226D', 'R1227T', 'R1230J',
-       'R1236J', 'R1239E', 'R1240T', 'R1243T', 'R1245E', 'R1254E',
-       'R1264P', 'R1269E', 'R1275D', 'R1278E', 'R1288P', 'R1291M',
-       'R1293P', 'R1303E', 'R1310J', 'R1313J', 'R1315T', 'R1320D',
-       'R1328E', 'R1330D', 'R1332M', 'R1334T', 'R1337E', 'R1338T',
-       'R1342M', 'R1343J', 'R1347D', 'R1348J', 'R1354E', 'R1361C',
-       'R1366J', 'R1367D', 'R1368T', 'R1372C', 'R1374T', 'R1377M',
-       'R1379E', 'R1380D', 'R1383J', 'R1385E', 'R1386T', 'R1387E',
-       'R1388T', 'R1393T', 'R1395M', 'R1396T', 'R1397D', 'R1404E',
-       'R1405E', 'R1409D', 'R1414E', 'R1415T', 'R1420T', 'R1421M',
-       'R1422T', 'R1423E', 'R1426N', 'R1427T', 'R1433E', 'R1436J',
-       'R1443D', 'R1444D', 'R1445E', 'R1447M', 'R1448T', 'R1449T',
-       'R1450D', 'R1456D', 'R1459M', 'R1461T', 'R1463E', 'R1465D',
-       'R1467M', 'R1468J', 'R1469D', 'R1472T', 'R1473J', 'R1476J',
-       'R1477J', 'R1482J', 'R1484T', 'R1486J', 'R1487T', 'R1488T',
-       'R1489E', 'R1491T', 'R1493T', 'R1496T', 'R1497T', 'R1498D',
-       'R1499T', 'R1501J', 'R1505J', 'R1515T', 'R1518T']
-## unique site codes: C, D, E, J, M, N, P, T
-
-# updated 2022-05-19 for revisions. Includes those that load for HPC SWRanalysis and SWRanalysisClustering
-updated_sub_names_catFR1 = ['R1004D', 'R1015J', 'R1024E', 'R1032D', 'R1035M', 'R1045E',
-       'R1061T', 'R1065J', 'R1066P', 'R1067P', 'R1083J', 'R1086M',
-       'R1089P', 'R1102P', 'R1105E', 'R1108J', 'R1112M', 'R1131M',
-       'R1138T', 'R1144E', 'R1147P', 'R1157C', 'R1158T', 'R1167M',
-       'R1171M', 'R1174T', 'R1176M', 'R1180C', 'R1188C', 'R1190P',
-       'R1192C', 'R1204T', 'R1207J', 'R1217T', 'R1221P', 'R1227T',
-       'R1230J', 'R1236J', 'R1239E', 'R1240T', 'R1243T', 'R1245E',
-       'R1254E', 'R1264P', 'R1269E', 'R1275D', 'R1278E', 'R1291M',
-       'R1293P', 'R1303E', 'R1310J', 'R1313J', 'R1315T', 'R1320D',
-       'R1328E', 'R1330D', 'R1332M', 'R1334T', 'R1337E', 'R1338T',
-       'R1343J', 'R1347D', 'R1348J', 'R1354E', 'R1361C', 'R1366J',
-       'R1367D', 'R1368T', 'R1372C', 'R1374T', 'R1377M', 'R1379E',
-       'R1380D', 'R1381T', 'R1382T', 'R1383J', 'R1385E', 'R1386T',
-       'R1387E', 'R1388T', 'R1393T', 'R1395M', 'R1396T', 'R1397D',
-       'R1398J', 'R1404E', 'R1405E', 'R1413D', 'R1414E', 'R1415T',
-       'R1420T', 'R1421M', 'R1422T', 'R1423E', 'R1426N', 'R1427T',
-       'R1433E', 'R1436J', 'R1443D', 'R1444D', 'R1445E', 'R1447M',
-       'R1448T', 'R1449T', 'R1450D', 'R1454M', 'R1456D', 'R1463E',
-       'R1465D', 'R1467M', 'R1468J', 'R1469D', 'R1472T', 'R1473J',
-       'R1476J', 'R1482J', 'R1484T', 'R1486J', 'R1487T', 'R1488T',
-       'R1489E', 'R1491T', 'R1493T', 'R1496T', 'R1497T', 'R1498D',
-       'R1501J', 'R1505J', 'R1515T', 'R1518T', 'R1525J',
-       'R1254E', 'R1426N', 'R1176M', 'R1398J', 'R1147P']
-updated_sub_names_catFR1_encoding = ['R1004D', 'R1015J', 'R1024E', 'R1032D', 'R1035M', 'R1045E',
-       'R1061T', 'R1065J', 'R1066P', 'R1067P', 'R1083J', 'R1086M',
-       'R1089P', 'R1102P', 'R1105E', 'R1108J', 'R1112M', 'R1131M',
-       'R1138T', 'R1144E', 'R1147P', 'R1157C', 'R1158T', 'R1167M',
-       'R1171M', 'R1174T', 'R1176M', 'R1180C', 'R1188C', 'R1190P',
-       'R1192C', 'R1204T', 'R1207J', 'R1217T', 'R1221P', 'R1227T',
-       'R1230J', 'R1236J', 'R1239E', 'R1240T', 'R1243T', 'R1245E',
-       'R1254E', 'R1264P', 'R1269E', 'R1275D', 'R1278E', 'R1291M',
-       'R1293P', 'R1303E', 'R1310J', 'R1313J', 'R1315T', 'R1320D',
-       'R1328E', 'R1330D', 'R1332M', 'R1334T', 'R1337E', 'R1338T',
-       'R1343J', 'R1347D', 'R1348J', 'R1354E', 'R1361C', 'R1366J',
-       'R1367D', 'R1368T', 'R1372C', 'R1374T', 'R1377M', 'R1379E',
-       'R1380D', 'R1381T', 'R1382T', 'R1383J', 'R1385E', 'R1386T',
-       'R1387E', 'R1388T', 'R1393T', 'R1395M', 'R1396T', 'R1397D',
-       'R1398J', 'R1404E', 'R1405E', 'R1413D', 'R1414E', 'R1415T',
-       'R1420T', 'R1421M', 'R1422T', 'R1423E', 'R1426N', 'R1427T',
-       'R1433E', 'R1436J', 'R1443D', 'R1444D', 'R1445E', 'R1447M',
-       'R1448T', 'R1449T', 'R1450D', 'R1454M', 'R1456D', 'R1463E',
-       'R1465D', 'R1467M', 'R1468J', 'R1469D', 'R1472T', 'R1473J',
-       'R1476J', 'R1482J', 'R1484T', 'R1486J', 'R1487T', 'R1488T',
-       'R1489E', 'R1491T', 'R1493T', 'R1496T', 'R1497T', 'R1498D',
-       'R1501J', 'R1505J', 'R1515T', 'R1518T', 'R1525J',
-       'R1254E', 'R1426N', 'R1176M', 'R1398J', 'R1147P',        
-       'R1092J', 'R1477J'] # these two weren't compiling previously so adding in when unlocking full dataset 2022-07-08
-
-# updated 2022-05-19 for revisions. Includes HPC load for both SWRanalysis and clust and ENT+PHC load for SWRanalysis
-updated_sub_names_FR1 = ['R1001P', 'R1002P', 'R1003P', 'R1006P', 'R1010J', 'R1020J',
-       'R1022J', 'R1026D', 'R1027J', 'R1031M', 'R1032D', 'R1033D',
-       'R1034D', 'R1035M', 'R1036M', 'R1044J', 'R1048E', 'R1049J',
-       'R1052E', 'R1053M', 'R1054J', 'R1059J', 'R1061T', 'R1063C',
-       'R1065J', 'R1066P', 'R1067P', 'R1068J', 'R1070T', 'R1077T',
-       'R1080E', 'R1083J', 'R1086M', 'R1089P', 'R1092J', 'R1093J',
-       'R1094T', 'R1096E', 'R1101T', 'R1102P', 'R1105E', 'R1108J',
-       'R1112M', 'R1113T', 'R1115T', 'R1118N', 'R1120E', 'R1122E',
-       'R1123C', 'R1124J', 'R1125T', 'R1128E', 'R1131M', 'R1134T',
-       'R1136N', 'R1137E', 'R1138T', 'R1147P', 'R1149N', 'R1150J',
-       'R1151E', 'R1153T', 'R1154D', 'R1158T', 'R1161E', 'R1162N',
-       'R1163T', 'R1167M', 'R1168T', 'R1171M', 'R1172E', 'R1174T',
-       'R1175N', 'R1176M', 'R1185N', 'R1187P', 'R1191J', 'R1195E',
-       'R1196N', 'R1200T', 'R1203T', 'R1204T', 'R1207J', 'R1212P',
-       'R1215M', 'R1217T', 'R1221P', 'R1226D', 'R1229M', 'R1230J',
-       'R1236J', 'R1241J', 'R1243T', 'R1260D', 'R1268T', 'R1275D',
-       'R1281E', 'R1283T', 'R1288P', 'R1290M', 'R1291M', 'R1292E',
-       'R1293P', 'R1297T', 'R1298E', 'R1299T', 'R1302M', 'R1306E',
-       'R1308T', 'R1310J', 'R1311T', 'R1313J', 'R1315T', 'R1316T',
-       'R1317D', 'R1320D', 'R1323T', 'R1325C', 'R1328E', 'R1329T',
-       'R1330D', 'R1332M', 'R1334T', 'R1336T', 'R1337E', 'R1338T',
-       'R1339D', 'R1341T', 'R1345D', 'R1346T', 'R1347D', 'R1349T',
-       'R1350D', 'R1354E', 'R1355T', 'R1358T', 'R1361C', 'R1363T',
-       'R1364C', 'R1367D', 'R1368T', 'R1373T', 'R1374T', 'R1377M',
-       'R1378T', 'R1379E', 'R1380D', 'R1381T', 'R1382T', 'R1383J',
-       'R1385E', 'R1386T', 'R1387E', 'R1390M', 'R1391T', 'R1393T',
-       'R1394E', 'R1395M', 'R1396T', 'R1397D', 'R1398J', 'R1402E',
-       'R1404E', 'R1405E', 'R1412M', 'R1414E', 'R1415T', 'R1416T',
-       'R1420T', 'R1421M', 'R1422T', 'R1423E', 'R1425D', 'R1427T',
-       'R1433E', 'R1436J', 'R1438M', 'R1443D', 'R1446T', 'R1447M',
-       'R1448T', 'R1449T', 'R1454M', 'R1457T', 'R1459M', 'R1460M',
-       'R1461T', 'R1463E', 'R1467M', 'R1542J', 'R1565T', 'R1569T',
-       'R1571T', 'R1572T', 'R1573T']
+from ripple_detection.general import get_logical_chunks, superVstack
 
 
-def getSplitDF(exp_df,sub_selection,exp,selected_period='surrounding_recall'):
-    # get the 40/60% splits I used for exploratory analysis/confirmation set (see https://osf.io/y5zwt for registration)
-    
-    # for seed in np.arange(44444,44499): # how I originally searched for a seed that gave 40/60 split with proportions I set below
-    #     print(seed); ripple_array = []; sub_names = []
-
-    first_half_sub_names = []
-    
-    print(exp)
-    
-    if exp == 'FR1':
-        np.random.seed(44462) # seed 44462 gives 25,845 of 60,417 recall trials (42.8%). Or 57/167 (34.1% of subs)
-        # subject numbers via len(np.unique(subject_name_array)) after loading half_df or exp_df
-
-        if sub_selection == 'whole':
-            whole_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if sb in updated_sub_names_FR1]
-            analysis_df = exp_df.iloc[whole_sub_idxs]            
-        else:
-            from slow_wave_ripple import original_sub_names_FR1 # all the unique sub names for FR1 task in df
-            proportion_subs = 0.5 # it's really 0.5 of initial pre-localization.pairs subs. So comes out to numbers above. And what we want to match for catFR1
-            first_half_sub_names = np.random.permutation(np.unique(original_sub_names_FR1))[:int(np.floor(len(np.unique(original_sub_names_FR1))*proportion_subs))]
-            if sub_selection == 'first_half':
-                half_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if sb in first_half_sub_names]
-            else:
-                half_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if sb not in first_half_sub_names]
-            analysis_df = exp_df.iloc[half_sub_idxs]
-            
-    elif exp == 'catFR1':
-        np.random.seed(44455) # seed 44455 gives 20,393 of 50,053 recall trials (40.7%). Or 46/138 (33.3% of subs)
-        if sub_selection == 'whole':
-            if selected_period == 'encoding':
-                from slow_wave_ripple import updated_sub_names_catFR1_encoding
-                updated_sub_names_catFR1 = updated_sub_names_catFR1_encoding
-            else:
-                from slow_wave_ripple import updated_sub_names_catFR1
-            whole_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if sb in updated_sub_names_catFR1]
-            analysis_df = exp_df.iloc[whole_sub_idxs]
-        else:
-            from slow_wave_ripple import original_sub_names_catFR1 # original unique sub names for catFR1 task in df when I did split
-            from slow_wave_ripple import updated_sub_names_catFR1
-            proportion_subs = 0.35 
-            first_half_sub_names = np.random.permutation(np.unique(original_sub_names_catFR1))[:int(np.floor(len(np.unique(original_sub_names_catFR1))*proportion_subs))]
-            if sub_selection == 'first_half':
-                half_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if sb in first_half_sub_names]
-            else: # second half (really ~60%)
-                # note that this will include the new subs since it's searching exp_df.subject by names
-                half_sub_idxs = [i for i,sb in enumerate(exp_df.subject) if ((sb not in first_half_sub_names)&(sb in updated_sub_names_catFR1))]
-            analysis_df = exp_df.iloc[half_sub_idxs]
-    
-    elif exp == 'RepFR1':
-        analysis_df = exp_df
-            
-    return analysis_df
-
-def Log(s, logname):
+def write_log(s, log_name):
     date = datetime.datetime.now().strftime('%F_%H-%M-%S')
     output = date + ': ' + str(s)
-    with open(logname, 'a') as logfile:
+    with open(log_name, 'a') as logfile:
         print(output)
         logfile.write(output+'\n')
 
-def LogDFExceptionLine(row, e, logname):
+
+def log_df_exception_line(row, e, log_name):
     rd = row._asdict()
     if type(e) is str: # if it's just a string then this was not an Exception I just wanted to print my own error
-        Log('DF Exception: Sub: '+str(rd['subject'])+', Sess: '+str(rd['session'])+\
-        ', Manual error, '+e+', file: , line no: XXX', logname)
+        write_log('DF Exception: Sub: ' + str(rd['subject']) + ', Sess: ' + str(rd['session']) + \
+                  ', Manual error, ' + e + ', file: , line no: XXX', log_name)
     else: # if e is an exception then normal print to .txt log
         exc_type, exc_obj, exc_tb = sys.exc_info()
         line_num = exc_tb.tb_lineno
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        Log('DF Exception: Sub: '+str(rd['subject'])+', Sess: '+str(rd['session'])+\
-        ', '+e.__class__.__name__+', '+str(e)+', file: '+fname+', line no: '+str(line_num), logname)
-    
-def LogDFException(row, e, logname):
+        write_log('DF Exception: Sub: ' + str(rd['subject']) + ', Sess: ' + str(rd['session']) + \
+                  ', ' + e.__class__.__name__ + ', ' + str(e) + ', file: ' + fname + ', line no: ' + str(line_num),
+                  log_name)
+
+
+def log_df_exception(row, e, log_name):
     rd = row._asdict()
-    Log('DF Exception: Sub: '+str(rd['subject'])+', Exp: '+str(rd['experiment'])+', Sess: '+\
-        str(rd['session'])+', '+e.__class__.__name__+', '+str(e), logname)
-    
-def LogException(e, logname):
-    Log(e.__class__.__name__+', '+str(e)+'\n'+
-        ''.join(traceback.format_exception(type(e), e, e.__traceback__)), logname)  
-    
-def normFFT(eeg):
+    write_log('DF Exception: Sub: ' + str(rd['subject']) + ', Exp: ' + str(rd['experiment']) + ', Sess: ' + \
+              str(rd['session']) + ', ' + e.__class__.__name__ + ', ' + str(e), log_name)
+
+
+def log_exception(e, log_name):
+    write_log(e.__class__.__name__ + ', ' + str(e) + '\n' +
+              ''.join(traceback.format_exception(type(e), e, e.__traceback__)), log_name)
+
+
+def norm_fft(eeg):
     from scipy import fft
     # gets you the frequency spectrum after the fft by removing mirrored signal and taking modulus
     N = len(eeg)
     fft_eeg = 1/N*np.abs(fft(eeg)[:N//2]) # should really normalize by Time/sample rate (e.g. 4 s of eeg/500 hz sampling=8)
     return fft_eeg
 
-# def getMTLregions(MTL_labels):
-#     # see brain_labels.py for MTL_labels
-#     HPC_labels = [MTL_labels[i] for i in [0,1,2,3,4,9,10,11,12,13,25,30,35,40,45,46,49,52,53,56]] # all labels within HPC
-#     ENT_labels = [MTL_labels[i] for i in [6,15,21,24,29,34,39,47,54]] # all labels within entorhinal
-#     PHC_labels = [MTL_labels[i] for i in [7,16,20,26,31,36,41,48,55]] # all labels within parahippocampal
-#     return HPC_labels,ENT_labels,PHC_labels    
-
-def getSWRpathInfo(remove_soz_ictal,recall_type_switch,selected_period,recall_minimum):
-    '''
-    get strings for path name for save and loading cluster data
-    '''
-    if remove_soz_ictal == 0:
-        soz_label = 'soz_in'
-    elif remove_soz_ictal == 1:
-        soz_label = 'soz_removed'
-    elif remove_soz_ictal == 2:
-        soz_label = 'soz_only'
-        
-    recall_selection_name = ''
-    if recall_type_switch == 1:
-        recall_selection_name = 'FIRSTOFCOMPOUND'
-    elif recall_type_switch == 2:
-        recall_selection_name = 'RECALLTWO'
-    elif recall_type_switch == 3:
-        recall_selection_name = 'SOLONOCOMPOUND'+str(recall_minimum)
-    elif recall_type_switch == 4:
-        recall_selection_name = 'FIRSTRECALL'
-    elif recall_type_switch == 5:
-        recall_selection_name = 'SECONDSLESSTHANIRI'
-    elif recall_type_switch == 6:
-        recall_selection_name = 'NOTFIRSTRECALLS'
-    elif recall_type_switch == 7:
-        recall_selection_name = 'NOTFIRSTANDSOLO'
-    elif recall_type_switch == 10:
-        recall_selection_name = 'NOIRI'
-        
-    if selected_period == 'surrounding_recall':
-        if recall_type_switch == 0:
-            subfolder = 'IRIonly' # for all recall trials as usual
-        else:
-            subfolder = recall_selection_name
-    elif selected_period == 'whole_retrieval':
-        subfolder = 'WHOLE_RETRIEVAL'
-    elif selected_period == 'encoding':
-        subfolder = 'ENCODING' 
-    elif selected_period == 'math':
-        subfolder = 'MATH'
-    elif selected_period == 'math_retrieval':
-        subfolder = 'MATH_RETRIEVAL'
-    elif selected_period == 'whole_encoding':
-        subfolder = 'WHOLE_ENCODING'
-    
-    return soz_label,recall_selection_name,subfolder
-
-def getSecondRecalls(evs_free_recall,IRI):
-    # instead of removing recalls with <IRI, get ONLY the second recalls that have been been removed
-    # note that all recalls within IRI of the second recalls are then remove to make it "only"
-    mstime_diffs = np.diff(evs_free_recall.mstime)
-    second_recalls = np.append(False,mstime_diffs<=IRI) # first one can never be second recall so add a False
-    mstime_diffs = np.append(0,mstime_diffs) # add a first trial just to make this align with diffs
-    adjusted_second_recalls = copy(second_recalls)
-
-    i=-1
-    while i < len(second_recalls)-1:
-        i+=1
-        second_recall = second_recalls[i]
-        if second_recall == True and i < (len(second_recalls)-1): # -1 since adding 1 below
-            # now that have a second recall, make sure ones after it aren't within 2000 ms of it
-            last_time_diff = 0
-            while (last_time_diff+mstime_diffs[i+1])<=IRI:
-                adjusted_second_recalls[i+1] = False
-                last_time_diff = last_time_diff + mstime_diffs[i+1]
-                i+=1
-                if i >= (len(second_recalls)-1): # same idea as above. already checked last row so -1!
-                    break                
-    return adjusted_second_recalls
-
-def selectRecallType(recall_type_switch,evs_free_recall,IRI,recall_minimum):
-    # input recall type (assigned in SWRanalysis) and output the selected idxs and their associated string name
-
-    if recall_type_switch == 0:
-        # remove events with Inter-Recall Intervals too small. IRI = psth_start since that's what will show in PSTH
-        selected_recalls_idxs = np.append(True,np.diff(evs_free_recall.mstime)>IRI)
-        recall_selection_name = ''
-    elif recall_type_switch == 1:
-        # subset of recalls < IRI as above, but ONLY keeping those first ones where a second one happens within IRI
-        # in other words, removing isolated recalls that don't lead to a subseqent recall 
-        
-        keep_recall_with_another_recall_within = 2000 # trying 2000 ms but could make thish smaller like 1000 ms
-        
-        # False at end since another recall never happens
-        selected_recalls_idxs = np.append(True,np.diff(evs_free_recall.mstime)>IRI) & \
-                                np.append(np.diff(evs_free_recall.mstime)<=keep_recall_with_another_recall_within,False) 
-        recall_selection_name = 'FIRSTOFCOMPOUND'
-        
-    elif recall_type_switch == 2:
-        # get ONLY second recalls within 2 s of the first recall (these are removed in selection_type=0)
-        selected_recalls_idxs = getSecondRecalls(evs_free_recall,IRI) 
-        recall_selection_name = 'RECALLTWO'
-        
-    elif recall_type_switch == 3:
-        # subset of recalls with at least *recall_minimum* until next recall ("isloated" recalls)
-        
-        # True at end since another recall never happens
-        selected_recalls_idxs = np.append(True,np.diff(evs_free_recall.mstime)>IRI) & \
-                                np.append(np.diff(evs_free_recall.mstime)>recall_minimum,True) 
-        recall_selection_name = 'SOLONOCOMPOUND'+str(recall_minimum)
-        
-    elif recall_type_switch == 4: 
-        # subset of recalls that come first in retrieval period
-        unique_lists = np.unique(evs_free_recall.list)
-        first_of_list_list = []
-        for list_num in unique_lists:
-            first_of_list_list.append(evs_free_recall[evs_free_recall.list==list_num][0:1].index[0]) # index of 1st
-        selected_recalls_idxs = []
-        for index_num in evs_free_recall.index: # go through each index number and see if it's one of the 1st of lists
-            if index_num in first_of_list_list:
-                selected_recalls_idxs.append(True)
-            else:
-                selected_recalls_idxs.append(False)
-        recall_selection_name = 'FIRSTRECALLS' 
-        
-    elif recall_type_switch == 5:
-        keep_second_recalls_within = 2000
-        # take only those recalls that come second in retrieval period within 2 s of first retrieval
-        lists_with_two_recalls = []
-        unique_lists = np.unique(evs_free_recall.list)
-        for list_num in unique_lists:
-            if sum(evs_free_recall.list==list_num)>=2: # if at least 2 recalls
-                lists_with_two_recalls.append(list_num)
-        seconds_lessthan_IRI = []
-        for list_num in lists_with_two_recalls:
-            # if IRI b/w 1st and 2nd recall is < XXXX
-            temp_evs = evs_free_recall[evs_free_recall.list==list_num]
-            if np.diff(temp_evs[0:2].mstime)<=keep_second_recalls_within:
-                seconds_lessthan_IRI.append(temp_evs[1:2].index[0]) # get index of these 2nd recalls < IRI
-        selected_recalls_idxs = []
-        for index_num in evs_free_recall.index: # go through each index number and see if it's one of the 1st of lists
-            if index_num in seconds_lessthan_IRI:
-                selected_recalls_idxs.append(True)
-            else:
-                selected_recalls_idxs.append(False)
-        recall_selection_name = 'SECONDSLESSTHANIRI'    
-        
-    elif recall_type_switch == 6:
-        # subset of recalls that DON'T come first in retrieval period
-        unique_lists = np.unique(evs_free_recall.list)
-        first_of_list_list = []
-        for list_num in unique_lists:
-            if sum(evs_free_recall.list==list_num)>1:
-                first_of_list_list.extend(evs_free_recall[evs_free_recall.list==list_num].index[1:]) # index of NOT 1st
-        selected_recalls_idxs = []
-        for index_num in evs_free_recall.index: # go through each index number and see if it's one of the 1st of lists
-            if index_num in first_of_list_list:
-                selected_recalls_idxs.append(True)
-            else:
-                selected_recalls_idxs.append(False)
-                
-        good_IRIs = np.append(True,np.diff(evs_free_recall.mstime)>IRI) # but still has to pass <IRI check        
-        selected_recalls_idxs = selected_recalls_idxs & good_IRIs # combine them
-                
-        recall_selection_name = 'NOTFIRSTRECALLS'   
-        
-    elif recall_type_switch == 7:
-        # subset of recalls that DON'T come first in retrieval period
-        unique_lists = np.unique(evs_free_recall.list)
-        first_of_list_list = []
-        for list_num in unique_lists:
-            if sum(evs_free_recall.list==list_num)>1:
-                first_of_list_list.extend(evs_free_recall[evs_free_recall.list==list_num].index[1:]) # index of NOT 1st
-        selected_recalls_idxs = []
-        for index_num in evs_free_recall.index: # go through each index number and see if it's one of the 1st of lists
-            if index_num in first_of_list_list:
-                selected_recalls_idxs.append(True)
-            else:
-                selected_recalls_idxs.append(False)
-        
-        # has to pass <IRI check AND isolated recalls check
-        good_IRIs = np.append(True,np.diff(evs_free_recall.mstime)>IRI) & \
-                    np.append(np.diff(evs_free_recall.mstime)>recall_minimum,True)  
-      
-        selected_recalls_idxs = selected_recalls_idxs & good_IRIs # combine them
-                
-        recall_selection_name = 'NOTFIRSTANDSOLO'   
-        
-    elif recall_type_switch == 10:
-        # remove events with Inter-Recall Intervals too small. IRI = psth_start since that's what will show in PSTH
-        selected_recalls_idxs = np.append(True,np.diff(evs_free_recall.mstime)>0)
-        recall_selection_name = 'NOIRI'
-    
-    return recall_selection_name,selected_recalls_idxs
-
-def getRecallsBeforeIntrusions(evs,evs_free_recall):
-    # get mask of recalls that lead to intrusions in frame of evs_free_recall
-    
-    temp_free_recall = evs[(evs.type=='REC_WORD')] # all recalls including intrusions
-    intrusion_idxs = np.where(temp_free_recall.intrusion.values!=0)[0]
-    intrusion_idxs = intrusion_idxs[intrusion_idxs>0]
-    pre_intrusion_recall_idxs = []
-    for intrusion_idx in intrusion_idxs:
-        if temp_free_recall.iloc[intrusion_idx].list == temp_free_recall.iloc[intrusion_idx-1].list:
-            pre_intrusion_recall_idxs.append(temp_free_recall.iloc[intrusion_idx-1].name)
-    pre_intrusion_recall_idxs # indices of recalls before intrusions that can be grabbed in frame of new evs_free_recall
-
-    pre_instrusion_recalls = np.zeros(len(evs_free_recall))
-    for recall in range(len(evs_free_recall)):
-        if evs_free_recall.iloc[recall].name in pre_intrusion_recall_idxs:
-            pre_instrusion_recalls[recall] = True
-    
-    return pre_instrusion_recalls
-
-def getSerialposFromDataframes(list_words_df,list_recalls_df):
-    # get serialpos from recalls since for FR1 not provided in recalls df
-    
-    # don't do list comprehension since intrustions don't have serialpos so have to add -999 via if statement
-    recalls_serial_pos = []
-    for w in list_recalls_df.item_name:
-        if w in np.array(list_words_df.item_name):
-            temp_values = list_words_df[list_words_df.item_name==w].serialpos.values
-            # only 1 in FR/catFR and want this to stay as an array 
-            recalls_serial_pos.append(temp_values[0]) # for repFR1 just take first serialpos since only using serialpos to identify repeats
-        else:
-            recalls_serial_pos.append(-999)
-    # recalls_serial_pos = [int(list_words_df[list_words_df.item_name==w].serialpos) for w in list_recalls_df.item_name] # old way
-
-    return recalls_serial_pos
-
-def getSerialposOfRecalls(evs_free_recall,word_evs,ln):
-    # take dataframes of recalls and words and find serial positions of recalls for this ln (list number)
-    
-    list_recalls_df = evs_free_recall[evs_free_recall.list==ln] # recalls df just for this list
-    list_words_df = word_evs[word_evs.list==ln] # words df just for this list
-
-    words = list(list_words_df['item_name'])
-        
-    if 'AXE' in words: # GoogleVec doesn't have this spelling of ax (fix for semantic clustering)
-        list_words_df = list_words_df.replace('AXE','AX')
-        list_recalls_df = list_recalls_df.replace('AXE','AX')
-
-    recalls_serial_pos = getSerialposFromDataframes(list_words_df,list_recalls_df)
-    
-    return recalls_serial_pos
-
-def removeRepeatedRecalls(evs_free_recall,word_evs):
-    # use recall df and list word df to identify repeated recalls and remove them from recall df
-    # 2020-10-22 if the repeated recalls are consecutive though, don't remove later ones, but remove initial ones! 
-    #      e.g. if you have A B B C we want to keep only the second B since our signal looks before recalls to look for clustering,
-    #.     so in this case the place to look for clustering is before A and before the second B
-    
-    # output for indicator: 0 means repeat, 1 means good recall, 2 means second of 2 which is ok to use too
-
-    nonrepeat_indicator = np.ones(len(evs_free_recall))    
-    list_nums = evs_free_recall.list.unique()   
-    for ln in list_nums:
-        evs_idxs_for_list_recalls = np.where(evs_free_recall.list==ln)[0] # idxs in evs df so can set repeats to 0        
-        recalls_serial_pos = getSerialposOfRecalls(evs_free_recall,word_evs,ln)
-        
-        _,repeats_to_remove = removeRepeatsBySerialpos(recalls_serial_pos) # get idxs for this list of which recalls are repeats
-        
-        if len(repeats_to_remove)>0:
-            temp_evs_idxs = evs_idxs_for_list_recalls[repeats_to_remove] # grab right idxs for the whole session index
-            nonrepeat_indicator[temp_evs_idxs] = 0 # so now 1 means good recall and 0 means repeated recall
-            
-            # HOWEVER, if the repeats are consecutive, the transitions are really still valid. 
-            # e.g. if the recalls are A B B C we should NOT treat the second B as if it were an intrusion...
-            # since the transitions from A->B and B->C are still valid. So let's mark these differently in nonrepeat_idxs
-            for i in range(len(recalls_serial_pos)-1):
-                if (recalls_serial_pos[i] == recalls_serial_pos[i+1]) and \
-                    (recalls_serial_pos[i]!=-999) and \
-                    (recalls_serial_pos[i] not in recalls_serial_pos[:i]):
-                    
-                    # check to see how long consecutive repeats is for this one
-                    j = copy(i)
-                    while recalls_serial_pos[i+1]==recalls_serial_pos[j+1]:
-                        nonrepeat_indicator[evs_idxs_for_list_recalls[j]] = 0 # now mark the initials as repeats since want to keep last one
-                        j+=1
-                        if j+1 == len(recalls_serial_pos): # end of list...happens when have recalls_serial_pos like [10 10]
-                            break
-                    # mark last repeat as a 2 so can identify later from nonrepeat_indicator (only 0s will be removed)
-                    nonrepeat_indicator[evs_idxs_for_list_recalls[j]] = 2
-
-    evs_free_recall = evs_free_recall[nonrepeat_indicator>0]
-    
-    return evs_free_recall,nonrepeat_indicator
-
-def removeRepeatsBySerialpos(serialpositions):
-    # Takes array of numbers (serial positions) and removes any repeated ones
-    # note that this considers -999s as repeats but that's fine since removed anyway as intrusions
-    items_to_keep = np.ones(len(serialpositions)).astype(bool)
-    items_seen = []
-    idx_removed = []
-    for idx in range(len
-                     (serialpositions)):
-        if serialpositions[idx] in items_seen:
-            items_to_keep[idx] = False
-            idx_removed.append(idx)
-        items_seen.append(serialpositions[idx])
-
-    final_vec = np.array(serialpositions)[items_to_keep]
-    return final_vec, idx_removed
-
-def getOutputPositions(evs,evs_free_recall):       
-    # let's get the recall output positions (after selecting which recalls...since can always use df to get original recall list)
-    lists_visited = evs_free_recall.list.unique()
-    
-    # if UTSW data then can't use evs.recalled for recalled words
-    if np.char.find(str(evs_free_recall[0:1].eegfile.values),'Lega_lab')>-1: 
-        # this would probably work for Rhino data but keep original below just in case   
-        orig_evs_free_recall = evs[(evs.type=='REC_WORD') & (evs.intrusion==0)]
-    elif evs.iloc[0].experiment == 'RepFR1':
-        orig_evs_free_recall = evs[(evs.type=='REC_WORD') & (evs.intrusion==0)]
-    else:
-        orig_evs_free_recall = evs[(evs.type=='REC_WORD') & (evs.recalled==True)] # get original 
- 
-    session_corrected_list_ops = []
-    for list_num in lists_visited:
-        original_list_recalls = orig_evs_free_recall[orig_evs_free_recall.list==list_num] # grab trials from this list from original free recalls
-        original_op_order = np.arange(len(original_list_recalls))
-        corrected_list_recalls = evs_free_recall[evs_free_recall.list==list_num]    
-        # I think the easiest way to do this is search for the mstimes in the original list to get index, then grab order
-        temp_idxs = [findAinB([pos_mstime],original_list_recalls.mstime)[0] for pos_mstime in corrected_list_recalls.mstime]
-        session_corrected_list_ops.extend(original_op_order[temp_idxs])
-    return session_corrected_list_ops
-
-def get_recall_clustering(recall_cluster_values, recalls_serial_pos):
-    from scipy.spatial.distance import euclidean
-    from scipy.stats import percentileofscore
-    import itertools
-    #Get temporal/semantic clustering scores given clustering values for recalls and serial positions
-    # 2020-10-04 JS updated this code to reflect pybeh's calculation of percentiles (the two test_dists lines and 'mean' over 'strict')
-    # 2020-10-20 JS updated for the new way I'm treating intrusions and repeats. Details in comments below but dealing with things like A B B B C A
-
-    #recall_cluster_values: array of semantic/temporal values
-    #recalls_serial_pos: array of indices for true recall sequence (indexing depends on when called), e.g. [1, 12, 3, 5, 9, 6]
-
-    # I'm removing repeats *after* this program now, so treat them as if they are intrusions so they do not contribute to the clustering score
-    _,idx_to_remove = removeRepeatsBySerialpos(recalls_serial_pos) 
-
-    # don't remove (duplicate value) intrusions or you could get false transitions (e.g. -999->3->-999->4 should not become 3->4)         
-    keep_intrusions = np.where(np.array(recalls_serial_pos)<=-999)[0]
-    idx_to_remove = np.setdiff1d(idx_to_remove, keep_intrusions)
-
-    actually_remove = []
-    for i in range(len(recalls_serial_pos)):
-        if i in idx_to_remove: # check each of these repeats to see if it should be removed or treated like intrusion
-            # however, if the repeats are consecutive, the transitions are actually still valid. 
-            # e.g. if the recalls are A B B C we should NOT treat the second B as if it were an intrusion...
-            # since the transitions from A->B and B->C are still valid. So let's leave one of these in as long as B hasn't been recalled earlier
-            if recalls_serial_pos[i] == recalls_serial_pos[i-1] and \
-                recalls_serial_pos[i] > -990 and \
-                (recalls_serial_pos[i] not in recalls_serial_pos[:i-1]):
-
-                actually_remove.append(i)
-            else:
-                # if a string of longer than two but haven't been used before remove all but one
-                if (recalls_serial_pos[i] == recalls_serial_pos[i-1]) and (i<len(recalls_serial_pos)-1):
-                    j = i
-                    while j < len(recalls_serial_pos):
-                        if recalls_serial_pos[j]==recalls_serial_pos[j+1]:
-                            actually_remove.append(j) # remove consecutive repeats
-                            j+=1
-                        else:
-                            actually_remove.append(j) # remove last consecutive repeat
-                            break
-                else:
-                    recalls_serial_pos[i] = -999 # if not a consecutive repeat label it like intrusion so don't create false transitions
-
-    if len(actually_remove)>0:
-        recalls_serial_pos = np.delete(recalls_serial_pos,actually_remove)
-
-    recall_cluster_values = copy(np.array(recall_cluster_values).astype(float))
-    all_pcts = []    
-    all_possible_trans = list(itertools.combinations(range(len(recall_cluster_values)), 2))
-    
-    for ridx in np.arange(len(recalls_serial_pos)-1):  #Loops through each recall event
-        if recalls_serial_pos[ridx] < 0 or recalls_serial_pos[ridx+1] < 0: 
-            all_pcts.append(-999) # transition to/from intrusions or non-consecutive repeats get dummy values
-        else:
-            possible_trans = [comb 
-                              for comb in all_possible_trans 
-                              if (recalls_serial_pos[ridx] in comb)
-                             ]
-            dists = []
-            for c in possible_trans: # all possible trans within list...do it this way since can avoid the used recalls with the except
-                try:
-                    dists.append(euclidean(recall_cluster_values[c[0]], recall_cluster_values[c[1]]))
-                except:
-                    #If this word was already realled, then we hit a NaN, so append the NaN
-                    dists.append(np.nan)
-            dists = np.array(dists)
-            dists = dists[np.isfinite(dists)]
-            true_trans = euclidean(np.atleast_1d(recall_cluster_values[recalls_serial_pos[ridx]]), 
-                       np.atleast_1d(recall_cluster_values[recalls_serial_pos[ridx+1]]))
-
-        
-            # remove the actual transition from the denominator to scale from 0 to 1 (see Manning 2011 PNAS)
-            test_dists = list(dists)
-            if true_trans in test_dists:
-                test_dists.remove(true_trans) # Ethan didn't do this either
-
-            # can only get 1.0 or 0.0 transition if transitioning from first or last word using 'mean' but how Manning 2011 does it
-            pctrank = 1.-percentileofscore(test_dists, true_trans, kind='mean')/100. # 'mean' as in PYBEH temp_fact. Ethan used 'strict'
-
-            all_pcts.append(pctrank) # percentile rank within each list
-            recall_cluster_values[recalls_serial_pos[ridx]] = np.nan # used serialpos gets a NaN so won't pass in next possible_trans
-    return all_pcts
 
 # PYBEH implementation for temporal clustering. This code applies the df to pybeh
 def pd_temp_fact(df, skip_first_n=0):
@@ -660,6 +73,7 @@ def pd_temp_fact(df, skip_first_n=0):
                   listLength=pres_itemnos.shape[1],
                   skip_first_n=skip_first_n)
     return temp_fact[0]
+
 
 def pd_semantic_fact(df, dist_mat, skip_first_n=0):
     # this doesn't work yet...not sure if I set up the apply with two inputs correctly
@@ -682,25 +96,6 @@ def pd_semantic_fact(df, dist_mat, skip_first_n=0):
     return temp_fact[0]
     
 
-def get_itemno_matrices(df, itemno_values='item_num', list_index=['subject', 'session', 'list'], pres_columns='serialpos'):
-    # used in above translator
-    """Expects as input a dataframe (df) for one subject"""
-    df.loc[:, itemno_values] = df.loc[:, itemno_values].astype(int)
-    df.loc[:, pres_columns] = df.loc[:, pres_columns].astype(int)
-    word_evs = df.query('type == "WORD"')
-    rec_evs = df.query('type == "REC_WORD"')
-    rec_evs.loc[:, 'outpos'] = rec_evs.groupby(list_index).cumcount() 
-    pres_itemnos_df = pd.pivot_table(word_evs, values=itemno_values, 
-                                 index=list_index, 
-                                 columns=pres_columns).reset_index()
-    rec_itemnos_df = pd.pivot_table(rec_evs, values=itemno_values, 
-                                 index=list_index, 
-                                 columns='outpos', fill_value=0).reset_index()
-    n_index_cols = len(list_index)
-    pres_itemnos = pres_itemnos_df.iloc[:, (n_index_cols):].values
-    rec_itemnos = rec_itemnos_df.iloc[:, (n_index_cols):].values
-    return pres_itemnos, rec_itemnos, pres_itemnos_df, rec_itemnos_df
-    
 def get_bp_tal_struct(sub, montage, localization):
     
     # inputs: subject name, montage, localization
@@ -717,7 +112,8 @@ def get_bp_tal_struct(sub, montage, localization):
     
     return tal_struct, bipolar_pairs, monopolar_channels
 
-def Loc2PairsTranslation(pairs,localizations):
+
+def loc_to_pairs_translation(pairs,localizations):
     # localizations is all the possible contacts and bipolar pairs locations
     # pairs is the actual bipolar pairs recorded (plugged in to a certain montage of the localization)
     # this finds the indices that translate the localization pairs to the pairs/tal_struct
@@ -739,6 +135,7 @@ def Loc2PairsTranslation(pairs,localizations):
 
     return pairs_to_loc_idxs # these numbers you see are the index in PAIRS frame that the localization.pairs region will get put
 
+
 def get_elec_regions(localizations,pairs): 
     # 2020-08-13 new version after consulting with Paul 
     # suggested order to use regions is: stein->das->MTL->wb->mni
@@ -759,17 +156,17 @@ def get_elec_regions(localizations,pairs):
         # so need to translate the localization region names to the pairs...which I think is easiest to just do here
 
         # get an index for every pair in pairs
-        loc_translation = Loc2PairsTranslation(pairs,localizations)
+        loc_translation = loc_to_pairs_translation(pairs, localizations)
         loc_dk_names = ['' for _ in range(len(pairs))]
-        loc_MTL_names = copy(loc_dk_names) 
+        loc_mtl_names = copy(loc_dk_names)
         loc_wb_names = copy(loc_dk_names)
         for i,loc in enumerate(loc_translation):
             if loc != ' ': # set it to this when there was no localization.pairs
                 if 'atlases.mtl' in localizations: # a few (like 5) of the localization.pairs don't have the MTL atlas
-                    loc_MTL_names[loc] = localizations['atlases.mtl']['pairs'][i] # MTL field from pairs in localization.json
-                    has_MTL = 1
+                    loc_mtl_names[loc] = localizations['atlases.mtl']['pairs'][i] # MTL field from pairs in localization.json
+                    has_mtl = 1
                 else:
-                    has_MTL = 0 # so can skip in below
+                    has_mtl = 0 # so can skip in below
                 loc_dk_names[loc] = localizations['atlases.dk']['pairs'][i]
                 loc_wb_names[loc] = localizations['atlases.whole_brain']['pairs'][i]   
     for pair_ct in range(len(pairs)):
@@ -800,10 +197,10 @@ def get_elec_regions(localizations,pairs):
                     continue
                 else:
                     pass
-            if len(localizations) > 1 and has_MTL==1:             # 'MTL' from localization.json
-                if loc_MTL_names[pair_ct] != '' and loc_MTL_names[pair_ct] != ' ':
-                    if str(loc_MTL_names[pair_ct]) != 'nan': # looking for "MTL" field in localizations.json
-                        regs.append(loc_MTL_names[pair_ct].lower())
+            if len(localizations) > 1 and has_mtl==1:             # 'MTL' from localization.json
+                if loc_mtl_names[pair_ct] != '' and loc_mtl_names[pair_ct] != ' ':
+                    if str(loc_mtl_names[pair_ct]) != 'nan': # looking for "MTL" field in localizations.json
+                        regs.append(loc_mtl_names[pair_ct].lower())
                         atlas_type.append('MTL_localization')
                         continue
                     else:
@@ -875,26 +272,26 @@ def get_elec_regions(localizations,pairs):
         except AttributeError:
             regs.append('error')
             atlas_type.append('error')
-    return np.array(regs),np.array(atlas_type),np.array(pair_number),has_stein_das
+    return np.array(regs), np.array(atlas_type), np.array(pair_number), has_stein_das
 
-# def getLocalizationToPairsTranslation(pairs,localizations):
-#     # this does the opposite of above...don't think I'll use this one but accidentally made it first so keep it JIC
-#     loc_pairs = localizations.type.pairs
-#     loc_pair_labels = np.array(loc_pairs.index)
+def get_localization_to_pairs_translation(pairs,localizations):
+    # this does the opposite of above...don't think I'll use this one but accidentally made it first so keep it JIC
+    loc_pairs = localizations.type.pairs
+    loc_pair_labels = np.array(loc_pairs.index)
 
-#     loc_to_pairs_idxs = []
-#     for pair in pairs.label:
-#         split_pair = pair.split('-') # split into list of 2
-#         idx = np.where([split_pair==list(lp) for lp in loc_pair_labels])[0]
-#         if loc_pair_labels[idx].size==0: # if didn't find it, check for reverse
-#             split_pair.reverse()
-#             temp_mask = [split_pair==list(lp) for lp in loc_pair_labels]
-#             idx = np.where(temp_mask)[0]
-#             if len(idx) == 0:
-#                 idx = ' '
-#         loc_to_pairs_idxs.extend(idx)
+    loc_to_pairs_idxs = []
+    for pair in pairs.label:
+        split_pair = pair.split('-') # split into list of 2
+        idx = np.where([split_pair==list(lp) for lp in loc_pair_labels])[0]
+        if loc_pair_labels[idx].size==0: # if didn't find it, check for reverse
+            split_pair.reverse()
+            temp_mask = [split_pair==list(lp) for lp in loc_pair_labels]
+            idx = np.where(temp_mask)[0]
+            if len(idx) == 0:
+                idx = ' '
+        loc_to_pairs_idxs.extend(idx)
 
-#     return loc_to_pairs_idxs
+    return loc_to_pairs_idxs
 
 def get_tal_distmat(tal_struct):
         
@@ -917,7 +314,8 @@ def get_tal_distmat(tal_struct):
     
     return distmat
 
-def correctEEGoffset(sub,session,exp,reader,events):
+
+def correct_eeg_offset(sub,session,exp,reader,events):
     # The EEG for recall times for many FR subjects (FR1 and catFR1 in particular) does not align with the events since the 
     # implementation of Unity. This is a temporary fix for the EEG alignment for these subjects before
     # the data is corrected in Rhino. Subject-by-subject details are here:
@@ -974,88 +372,8 @@ def correctEEGoffset(sub,session,exp,reader,events):
         
     return events
 
-def getRetrievalStartAlignmentCorrection(sub,session,exp):
-        ## Fix EEG alignment when using REC_START (start of retrieval) by trying to align to the end of the beep
-    # Similar idea as with fixing the EEG alignment issues, except this time various versions of FR1 and
-    # catFR1 after implementation of Unity had different beep and star lengths than with pyEPL. The cases are 
-    # each explained below, but the general idea is to align the start of retrieval with the end of the beep, 
-    # since this is the best cue we have for the beginning of recall. Notably, the asterisks in Unity tend to go
-    # past the beep (this shouldn't have happened!), so actual recall times might come much later, but there's
-    # evidence from SWRs as a biomarker of recall that many subjects were recollecting during the beep and then
-    # likely holding the retrieved memory until the asterisks disappeared
-    # jjsakon 2020-11-10
-    
-    ## Inputs ##
-    # same as program above #
-    
-    ## Outputs ##
-    # align_adjust: factor to add to rel_start and rel_end in your reader.load_eeg call to grab the right EEG chunk
 
-    import pickle        
-    import re
-    
-    # first see if we were able to detect a beep time in the audio file
-    
-    fn = '/home1/john/SWR/figures/beep_RT_determination/beep_times_update2.pkl' # beep times for each session
-    
-    beep_time = 'nan'
-    
-    with open(fn,'rb') as f:
-        dat = pickle.load(f)
-    if sub in dat:
-        if exp in dat[sub]:
-            if session in dat[sub][exp]:
-                beep_time = 1000*np.median(np.fromiter(dat[sub][exp][session].values(), dtype=float))
-                
-    # if there is no time from beep detection program, I estimate from session per: 
-    # https://docs.google.com/spreadsheets/d/1co5f7-dPOktGIXZJ7uptv0SwBJhf36TuhVSMFqRC0X8/edit?usp=sharing
-
-    sub_num = [int(s) for s in re.findall(r'\d+',sub)] # extract number for sub
-
-    if (sub in ['R1379E','R1385E','R1387E','R1394E','R1402E']) or \
-        (sub=='R1404E' and session==0 and exp=='catFR1'): 
-        # first 5 true for catFR1 and FR1. R1404E only one catFR1 session has partial beep 
-        # for these subs there is a partial beep ~250 ms long after audio starts so adjust time to beep_end
-        # (in other words grab EEG shifted 250 ms later)
-        align_adjust = 250 # beep_time # could use actual beep_time here, but my guess is Connor's program is conservative
-        # and the program was theoretically consistently off the same amount
-
-    # subs where unity was implemented for some sessions but not others
-    elif (sub=='R1396T' and exp=='catFR1') or (sub=='R1396T' and session==1) or \
-         (sub=='R1395M' and exp=='catFR1') or (sub=='R1395M' and exp=='FR1' and session>0):
-        # subjects with 0 s reaction times where audio likely started at end of asterisks ~500 ms after beep_end
-        align_adjust = -500
-
-    # do nothing since these sessions were pyEPL so the offset is okay
-    # *OR* sub is after R1525J when we caught the mistake and realigned asterisks_off/beep_off/RET_START with each other
-    elif (sub=='R1406M' and session==0) or (sub=='R1415T' and session==0 and exp=='FR1') or (sub=='R1422T' and exp=='FR1') \
-            or sub_num[0]>=1525:
-        if beep_time == 'nan':
-            align_adjust = 0
-        else:
-            align_adjust = beep_time 
-
-    # remaining unity subs
-    elif sub_num[0]>=1397 or sub == 'R1389J': 
-        # subjects with 0 s reaction times where audio likely started at end of asterisks ~500 ms after beep_end
-        align_adjust = -500
-        
-    elif beep_time > 600:
-        # a number of weird unity subs have this. As above with ~250 ms subs, grab EEG later shifted by beep amount
-        # again see google doc for more details
-        align_adjust = 650 # beep_time # could use actual beep_time here, but my guess is Connor's program is conservative
-        # and the program was theoretically consistently off the same amount
-
-    # the remainder should be pyEPL subjects, most of which have very short beeps. Can use those to be anal retentive
-    else:
-        if beep_time == 'nan':
-            align_adjust = 0
-        else:
-            align_adjust = beep_time   
-
-    return np.round(align_adjust)
-
-def getBadChannels(tal_struct,elecs_cat,remove_soz_ictal):
+def get_bad_channels(tal_struct,elecs_cat,remove_soz_ictal):
     # get the bad channels and soz/ictal/lesion channels from electrode_categories.txt files
     
     # 2021-03-15 rewriting this to put 0 for good electrode, 1 for SOZ, and 2 for bad_electrodes (bad leads or the like)
@@ -1089,46 +407,62 @@ def getBadChannels(tal_struct,elecs_cat,remove_soz_ictal):
             
     return bad_bp_mask
 
-def getStartEndArrays(ripple_array):
-    '''
-    Get separate arrays of SWR starts and SWR ends from the full binarized array
-    '''
-    
-    # Shift the ripple array to the right and left by one position
-    shifted_right = np.roll(ripple_array, shift=1, axis=1)
-    shifted_left = np.roll(ripple_array, shift=-1, axis=1)
-    
-    # Find the start by looking for a transition from 0 to 1
-    start_array = (ripple_array == 1) & (shifted_right == 0)
-    start_array[:, 0] = ripple_array[:, 0]  # Handle the edge case for the first column
-    
-    # Find the end by looking for a transition from 1 to 0
-    end_array = (ripple_array == 1) & (shifted_left == 0)
-    end_array[:, -1] = ripple_array[:, -1]  # Handle the edge case for the last column
-    
-    return start_array.astype('uint8'), end_array.astype('uint8')
+# def get_start_end_arrays(ripple_array):
+#     """
+#     Get separate arrays of SWR starts and SWR ends from the full binary array
+#     """
+#
+#     # Shift the ripple array to the right and left by one position
+#     shifted_right = np.roll(ripple_array, shift=1, axis=1)
+#     shifted_left = np.roll(ripple_array, shift=-1, axis=1)
+#
+#     # Find the start by looking for a transition from 0 to 1
+#     start_array = (ripple_array == 1) & (shifted_right == 0)
+#     start_array[:, 0] = ripple_array[:, 0]  # Handle the edge case for the first column
+#
+#     # Find the end by looking for a transition from 1 to 0
+#     end_array = (ripple_array == 1) & (shifted_left == 0)
+#     end_array[:, -1] = ripple_array[:, -1]  # Handle the edge case for the last column
+#
+#     return start_array.astype('uint8'), end_array.astype('uint8')
+
+
+def get_start_end_arrays(ripple_array):
+    start_array = np.zeros((ripple_array.shape), dtype='uint8')
+    end_array = np.zeros((ripple_array.shape), dtype='uint8')
+
+    num_trials = ripple_array.shape[0]
+    for trial in range(num_trials):
+        ripplelogictrial = ripple_array[trial]
+        starts, ends = get_logical_chunks(ripplelogictrial)
+        temp_row = np.zeros(len(ripplelogictrial))
+        temp_row[starts] = 1
+        start_array[trial] = temp_row  # time when each SWR starts
+        temp_row = np.zeros(len(ripplelogictrial))
+        temp_row[ends] = 1
+        end_array[trial] = temp_row
+    return start_array, end_array
+
 
 def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
-    '''
-    detect ripples similar to with Butterworth, but using Norman et al 2019 algo (based on Stark 2014 algo). Description:
+    """
+    detect ripples similar to with Butterworth, but using Norman et al. 2019 algo (based on Stark 2014 algo). Description:
     Then Hilbert, clip extreme to 4 SD, square this clipped, smooth w/ Kaiser FIR low-pass filter with 40 Hz cutoff,
     mean and SD computed across entire experimental duration to define the threshold for event detection
-    Events from original (squared but unclipped) signal >4 SD above baseline were selected as candidate SWR events.
+    Events from original (squared but un-clipped) signal >4 SD above baseline were selected as candidate SWR events.
     Duration expanded until ripple power <2 SD. Events <20 ms or >200 ms excluded. Adjacent events <30 ms separation (peak-to-peak) merged.
 
     :param array eeg_rip: hilbert transformed ieeg data
-    '''
+    """
 
-    from scipy.signal import firwin,filtfilt,kaiserord,convolve2d
-    
-    candidate_SD = 3
+    candidate_sd = 3
     artifact_buffer = 100 # ms around IED events to remove SWRs
     sr_factor = 1000/sr
     ripple_min = 20/sr_factor # convert each to ms
     ripple_max = 250/sr_factor #200/sr_factor
     min_separation = 30/sr_factor # peak to peak
     orig_eeg_rip = copy(eeg_rip)
-    clip_SD = np.mean(eeg_rip)+candidate_SD*np.std(eeg_rip)
+    clip_SD = np.mean(eeg_rip) + candidate_sd * np.std(eeg_rip)
     eeg_rip[eeg_rip>clip_SD] = clip_SD # clip at 3SD since detecting at 3 SD now
     eeg_rip = eeg_rip**2 # square
     
@@ -1143,7 +477,7 @@ def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
     
     # now, find candidate events (>mean+3SD) 
     orig_eeg_rip = orig_eeg_rip**2
-    candidate_thresh = mean_detection_thresh+candidate_SD*std_detection_thresh
+    candidate_thresh = mean_detection_thresh + candidate_sd * std_detection_thresh
     expansion_thresh = mean_detection_thresh+2*std_detection_thresh
     ripplelogic = orig_eeg_rip >= candidate_thresh # EF1208, will evaluate to squared signal is above threshold
     # remove IEDs detected from Norman 25-60 algo...maybe should do this after expansion to 2SD??
@@ -1155,7 +489,7 @@ def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
     trial_length = ripplelogic.shape[1]
     for trial in range(num_trials):
         ripplelogictrial = ripplelogic[trial]
-        starts,ends = getLogicalChunks(ripplelogictrial)
+        starts,ends = get_logical_chunks(ripplelogictrial)
         data_trial = orig_eeg_rip[trial]
         for i,start in enumerate(starts):
             current_time = 0
@@ -1245,7 +579,7 @@ def detect_ripples_butter(eeg_rip, eeg_ied, eeg_mne, sr):  # ,mstimes):
             continue
         hilbamptrial = eeg_rip_z[trial]
 
-        starts,ends = getLogicalChunks(ripplelogictrial) # get chunks of 1s that are putative SWRs
+        starts,ends = get_logical_chunks(ripplelogictrial)  # get chunks of 1s that are putative SWRs
         for ripple in range(len(starts)):
             if ends[ripple]+1-starts[ripple] < ripplewidth or \
             max(abs(hilbamptrial[starts[ripple]:ends[ripple]+1])) < ripmaxthresh:
@@ -1257,7 +591,7 @@ def detect_ripples_butter(eeg_rip, eeg_ied, eeg_mne, sr):  # ,mstimes):
         ripplelogictrial = ripplelogic[trial]
         if np.sum(ripplelogictrial)==0:
             continue
-        starts,ends = getLogicalChunks(ripplelogictrial)
+        starts,ends = get_logical_chunks(ripplelogictrial)
         if len(starts)<=1:
             continue
         for ripple in range(len(starts)-1): # loop through ripples before last
@@ -1290,7 +624,7 @@ def detect_ripples_staresina(eeg_rip, sr):
     ripplelogic = np.zeros((np.shape(binary_array)[0],np.shape(binary_array)[1]))
     for i_trial in range(len(binary_array)):
         binary_trial = binary_array[i_trial]
-        starts,ends = getLogicalChunks(binary_trial)
+        starts,ends = get_logical_chunks(binary_trial)
         candidate_events = (np.array(ends)-np.array(starts)+1)>=(min_duration/sr_factor)
         starts = np.array(starts)[candidate_events]
         ends = np.array(ends)[candidate_events]
@@ -1800,18 +1134,6 @@ def makePairwiseComparisonPlot(comp_data,comp_names,col_names,figsize=(7,5)):
     print(fdr_pvalues)
     return fdr_pvalues
 
-def StartFig():
-    test = plt.figure();
-    plt.rcParams.update({'font.size':14});
-    return test;
-
-def PrintTest():
-    print('testttt')
-    
-def SaveFig(basename):
-    plt.savefig(basename+'.png')
-    plt.savefig(basename+'.pdf')
-    print('Saved .png and .pdf')
 
 def SubjectDataFrames(sub_list):
     if isinstance(sub_list, str):
@@ -1822,6 +1144,7 @@ def SubjectDataFrames(sub_list):
     indices = functools.reduce(lambda x,y: x|y, indices_list)
     df_matched = df[indices]
     return df_matched
+
 
 def GetElectrodes(sub,start,stop):
     df_sub = SubjectDataFrames(sub)
@@ -1834,88 +1157,23 @@ def GetElectrodes(sub,start,stop):
 def MakeLocationFilter(scheme, location):
     return [location in s for s in [s if s else '' for s in scheme.iloc()[:]['ind.region']]]
 
-def getElectrodeRanges(elec_regions,exp,sub,session,mont):
-    # remove bad range of electrodes (high noise or repetitive channels) that I found by manually looking through raster plots.
-    # note that each of these subs/sessions should be documented in a pairs of ppts in the FR1/catFR1 cleaning folders on box
-    # Oftentimes if there are 3 pairs in a row that were all in HPC, I'll remove the middle one since it has some redundant signals 
-    # with each of other two
-    # 2021-10-28 adding in repFR
-    electrode_search_range = range(len(elec_regions))
-    if exp == 'FR1':
-        if sub == 'R1120E':
-            electrode_search_range = range(30) # HPC elecs after 25:26 have lots of artifacts that get picked up as SWRs. See subject figure PPT
-        elif sub == 'R1349T': # channels 90 and below have tons of artifcats. After that looks okay though
-            electrode_search_range = range(91,len(elec_regions))
-        elif sub == 'R1397D': # for these two sessions two pairs of the electrodes have lots of correlated noise. Remove them
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 60]
-            electrode_search_range.remove(110)
-        elif sub == 'R1332M' and session == 1:
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 48] # some real weird bands in these couple sessions
-            electrode_search_range.remove(49)
-        elif sub == 'R1299T':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 34] # see PPT. These two pairs shared an electrode and had tons of correlated artifacts
-            electrode_search_range.remove(43) 
-    # note that I'm okay with overlap in say entorhinal also removing hippocampal channels. So don't specify region in these
-    # just assume that the overlap exists in all cases
-    elif exp == 'catFR1':
-        if sub == 'R1269E':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 11] # 10, 11, 54, 55 all look identical in HPC raster so remove latter 3
-            electrode_search_range.remove(54) # (see SWR catFR1 problem sessions ppt for details)
-            electrode_search_range.remove(55)
-        elif sub == 'R1328E':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 38] # overlapping signal with ch 37
-        elif sub == 'R1367D':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 71] # overlapping signals with neighbor
-            electrode_search_range.remove(96)
-        elif sub == 'R1397D':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 110]
-            electrode_search_range.remove(60) 
-        elif sub == 'R1405E' and mont==0:
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 44]
-        elif sub == 'R1405E' and mont==1:
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 79]
-        elif sub == 'R1447M': # overlapping with neighbors. again documented in SWR catFR1 problem sessions ppt 
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 15]
-            electrode_search_range.remove(17)
-        elif sub == 'R1469D':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 16]
-        elif sub == 'R1489E':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 3] # first entorhinal...see catFR1 prob session ppt
-            electrode_search_range.remove(55)
-        elif sub == 'R1400N':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 39] # entorhinal...middle of 3 consecutive channels
-        elif sub == 'R1190P':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 96] # entorhinal...3rd of 4 consecutive channels
-        elif sub == 'R1092J':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 39] # entorhinal...3rd of 4 consecutive channels
-        elif sub == 'R1028M':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 8] # entorhinal...3rd of 4 consecutive channels
-        elif sub == 'R1107J':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 3] # parahippocampal...4th of 5 consecutive channels
-        elif sub == 'R1364C':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 60] # parahippocampal...3rd of 4 consecutive channels
-        elif sub == 'R1527J':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 156] # consecutive channels with repeated signal
-    elif exp == 'RepFR1':
-        if sub == 'R1528E':
-            electrode_search_range = [i for i in range(len(elec_regions)) if i != 154]
-            electrode_search_range.remove(15) 
-    return electrode_search_range
 
 def lmax(x,filt):
-    # translated from Matlab by J. Sakon 2021-11-16
-    '''Find local maxima in vector X,where
-%	LMVAL is the output vector with maxima values, INDD  is the 
-%	corresponding indexes, FILT is the number of passes of the small
-%	running average filter in order to get rid of small peaks.  Default
-%	value FILT =0 (no filtering). FILT in the range from 1 to 3 is 
-%	usially sufficient to remove most of a small peaks
-%	For example:
-%	xx=0:0.01:35; y=sin(xx) + cos(xx ./3); 
-%	plot(xx,y); grid; hold on;
-%	[b,a]=lmax(y,2)
-%	 plot(xx(a),y(a),'r+')
-%	see also LMIN '''
+    """
+    Find local maxima in vector X,where
+	LMVAL is the output vector with maxima values, INDD  is the
+	corresponding indexes, FILT is the number of passes of the small
+	running average filter in order to get rid of small peaks.  Default
+	value FILT =0 (no filtering). FILT in the range from 1 to 3 is
+	usially sufficient to remove most of a small peaks
+	For example:
+	xx=0:0.01:35; y=sin(xx) + cos(xx ./3);
+	plot(xx,y); grid; hold on;
+	[b,a]=lmax(y,2)
+	 plot(xx(a),y(a),'r+')
+	see also LMIN
+    translated from Matlab by J. Sakon 2021-11-16
+    """
     
     x_orig = copy(x)
     num_pts = len(x)
@@ -1935,13 +1193,13 @@ def lmax(x,filt):
             if x[i] > x[i+1]:
                 lmval.append(x[i])
                 indd.append(i)
-            elif ( (x[i] == x[i+1]) & (x[i]==x[i+2]) ):
+            elif (x[i] == x[i + 1]) & (x[i] == x[i + 2]):
                 i = i+2 # skip 2 points
             elif x[i] == x[i+1]:
                 i = i+1 # skip 1 point
         i = i+1
-    if ( (filt > 0) & (len(indd)>0 ) ):
-        if ( (indd[0] <= 3) | ((indd[-1]+2) > num_pts) ):
+    if (filt > 0) & (len(indd) > 0):
+        if (indd[0] <= 3) | ((indd[-1] + 2) > num_pts):
             rng = 1
         else:
             rng = 2
@@ -2040,7 +1298,7 @@ class SubjectStats():
         return np.sum(self.recalled)/np.sum(self.num_words_presented)
     
 def SubjectStatTable(subjects):
-    ''' Prepare LaTeX table of subject stats '''   
+    """ Prepare LaTeX table of subject stats """
 
     table = ''
     try:
@@ -2092,23 +1350,23 @@ def get_power(eeg, tstart, tend, freqs=[5,8]):
 
 def ClusterRun(function, parameter_list, max_cores=1000):
 
-    '''
+    """
     function: The routine run in parallel, which must contain all necessary
        imports internally.
-    
+
        parameter_list: should be an iterable of elements, for which each element
        will be passed as the parameter to function for each parallel execution.
-       
+
        max_cores: Standard Rhino cluster etiquette is to stay within 100 cores
        at a time.  Please ask for permission before using more.
-       
+
        In jupyterlab, the number of engines reported as initially running may
        be smaller than the number actually running.  Check usage from an ssh
        terminal using:  qstat -f | egrep "$USER|node" | less
-       
+
        Undesired running jobs can be killed by reading the JOBID at the left
        of that qstat command, then doing:  qdel JOBID
-    '''
+    """
 
     import cluster_helper.cluster
     from pathlib import Path
@@ -2142,12 +1400,10 @@ def ClusterRun(function, parameter_list, max_cores=1000):
 def z_score_epochs(power):
     # power should be a 3d array of shape num_trials x num_channels x num_timesteps
     return (power - np.mean(power, axis=(0,2), keepdims=True)) / np.std(np.mean(power, axis=2, keepdims=True),axis=0, keepdims=True) 
- 
+
 def compute_morlet(eeg, freqs, sr, desired_sr, n_jobs, tmin, tmax, mode='power', split_power_idx=None):
-    
-    '''
-    
-    :param mne array eeg: eeg data 
+    """
+    :param mne array eeg: eeg data
     :param ndarray freqs: frequencies to compute morlet wavelets over
     :param int sr: sampling rate of eeg data
     :param int desired_sr: desired sr of power/phase data
@@ -2156,17 +1412,14 @@ def compute_morlet(eeg, freqs, sr, desired_sr, n_jobs, tmin, tmax, mode='power',
     :param str mode: power or phase
     :param int/None split_power_idx: compute two freq bands, return both and their union
     if int this is where freqs is divided
-    
-    '''
+    """
     
     from mne.time_frequency import tfr_morlet
     from mne.filter import resample
     morlet_output = tfr_morlet(eeg, freqs, n_cycles=5, return_itc=False, average=False, n_jobs=n_jobs, output=mode)
-    
-    morlet_output.crop(tmin=tmin/1000, tmax=tmax/1000, include_tmax=False) # crop out the buffer 
+    morlet_output.crop(tmin=tmin/1000, tmax=tmax/1000, include_tmax=False) # crop out the buffer
     
     if mode == 'power':
-        
         # log transform, mean across wavelet frequencies, and z-score
         #morlet_output.data = np.log10(morlet_output.data)
         
@@ -2182,18 +1435,14 @@ def compute_morlet(eeg, freqs, sr, desired_sr, n_jobs, tmin, tmax, mode='power',
         morlet_output.data = scipy.stats.circmean(morlet_output.data, high=np.pi, low=-np.pi, axis=2)
         
     if sr > desired_sr: 
-      
         morlet_output.data = resample(morlet_output.data, down=sr/desired_sr)
-        
-        if split_power_idx is not None: 
-            
+        if split_power_idx is not None:
             morlet_output_data_1 = resample(morlet_output_data_1, down=sr/desired_sr)
             morlet_output_data_2 = resample(morlet_output_data_2, down=sr/desired_sr)
     
     if split_power_idx is not None:
         return morlet_output.data, morlet_output_data_1, morlet_output_data_2
-        
-    else: 
+    else:
         return morlet_output.data
     
     
