@@ -10,10 +10,15 @@ import functools
 import datetime
 import scipy
 from scipy.signal import firwin, filtfilt, kaiserord, convolve2d
+from scipy.stats import ttest_1samp
+import statsmodels.formula.api as smf
+from statsmodels.stats.multitest import fdrcorrection
+import matplotlib.pyplot as plt
+import seaborn as sb
 
 # from ptsa.data.filters import morlet
 # from ptsa.data.filters import ButterworthFilter
-from ripple_detection.general import get_logical_chunks, superVstack
+from ripple_detection.general import superVstack, findInd, isNaN, CMLReadDFRow, get_logical_chunks2
 
 
 def write_log(s, log_name):
@@ -52,379 +57,29 @@ def log_exception(e, log_name):
 def norm_fft(eeg):
     from scipy import fft
     # gets you the frequency spectrum after the fft by removing mirrored signal and taking modulus
-    N = len(eeg)
-    fft_eeg = 1/N*np.abs(fft(eeg)[:N//2]) # should really normalize by Time/sample rate (e.g. 4 s of eeg/500 hz sampling=8)
+    n = len(eeg)
+    fft_eeg = 1/n*np.abs(fft(eeg)[:n//2]) # should really normalize by Time/sample rate (e.g. 4 s of eeg/500 hz sampling=8)
     return fft_eeg
 
 
-# PYBEH implementation for temporal clustering. This code applies the df to pybeh
-def pd_temp_fact(df, skip_first_n=0):
-    
-    import pybeh
-    from pybeh.temp_fact import temp_fact
-    from pybeh.make_recalls_matrix import make_recalls_matrix
-    
-    """Expects as input a dataframe (df) for one subject"""
-    pres_itemnos, rec_itemnos, _, _ = get_itemno_matrices(df)
-    recalls = pybeh.make_recalls_matrix.make_recalls_matrix(pres_itemnos, rec_itemnos)
+def get_start_end_arrays2(ripple_array):
+    """
+    Get separate arrays of SWR starts and SWR ends from the full binary array
+    """
 
-    temp_fact = pybeh.temp_fact.temp_fact(recalls=recalls, 
-                  subjects=np.array(['a'] * recalls.shape[0]),
-                  listLength=pres_itemnos.shape[1],
-                  skip_first_n=skip_first_n)
-    return temp_fact[0]
+    # Shift the ripple array to the right and left by one position
+    shifted_right = np.roll(ripple_array, shift=1, axis=1)
+    shifted_left = np.roll(ripple_array, shift=-1, axis=1)
 
+    # Find the start by looking for a transition from 0 to 1
+    start_array = (ripple_array == 1) & (shifted_right == 0)
+    start_array[:, 0] = ripple_array[:, 0]  # Handle the edge case for the first column
 
-def pd_semantic_fact(df, dist_mat, skip_first_n=0):
-    # this doesn't work yet...not sure if I set up the apply with two inputs correctly
-    # in any case, the way this uses item_num doesn't make sense with my 461 (not 300) 
-    # word list used across ALL catFR1. Would have to reindex the 300 words in each pool
-    # to 461 or recalculate the word2vec for every session which is a pain
-    import pybeh
-    from pybeh.dist_fact import dist_fact
-    from pybeh.make_recalls_matrix import make_recalls_matrix
-    
-    """Expects as input a dataframe (df) for one subject"""
-    pres_itemnos, rec_itemnos, _, _ = get_itemno_matrices(df)
-#     recalls = pybeh.make_recalls_matrix.make_recalls_matrix(pres_itemnos, rec_itemnos)
+    # Find the end by looking for a transition from 1 to 0
+    end_array = (ripple_array == 1) & (shifted_left == 0)
+    end_array[:, -1] = ripple_array[:, -1]  # Handle the edge case for the last column
 
-    temp_fact = pybeh.dist_fact.dist_fact(rec_itemnos=rec_itemnos, pres_itemnos=pres_itemnos,
-                  subjects=np.array(['a'] * rec_itemnos.shape[0]),
-                  dist_mat=dist_mat,
-                  listLength=pres_itemnos.shape[1],
-                  skip_first_n=skip_first_n)
-    return temp_fact[0]
-    
-
-def get_bp_tal_struct(sub, montage, localization):
-    
-    # inputs: subject name, montage, localization
-    # outputs: 
-    
-    from ptsa.data.readers import TalReader    
-   
-    #Get electrode information -- bipolar
-    tal_path = '/protocols/r1/subjects/'+sub+'/localizations/'+str(localization)+'/montages/'+str(montage)+'/neuroradiology/current_processed/pairs.json'
-    tal_reader = TalReader(filename=tal_path)
-    tal_struct = tal_reader.read()
-    monopolar_channels = tal_reader.get_monopolar_channels()
-    bipolar_pairs = tal_reader.get_bipolar_pairs()
-    
-    return tal_struct, bipolar_pairs, monopolar_channels
-
-
-def loc_to_pairs_translation(pairs,localizations):
-    # localizations is all the possible contacts and bipolar pairs locations
-    # pairs is the actual bipolar pairs recorded (plugged in to a certain montage of the localization)
-    # this finds the indices that translate the localization pairs to the pairs/tal_struct
-
-    loc_pairs = localizations.type.pairs
-    loc_pairs = np.array(loc_pairs.index)
-    split_pairs = [pair.upper().split('-') for pair in pairs.label] # pairs.json is usually upper anyway but things like "micro" are not
-    pairs_to_loc_idxs = []
-    for loc_pair in loc_pairs:
-        loc_pair = [loc.upper() for loc in loc_pair] # pairs.json is always capitalized so capitalize location.pairs to match (e.g. Li was changed to an LI)
-        loc_pair = list(loc_pair)
-        idx = (np.where([loc_pair==split_pair for split_pair in split_pairs])[0])
-        if len(idx) == 0:
-            loc_pair.reverse() # check for the reverse since sometimes the electrodes are listed the other way
-            idx = (np.where([loc_pair==split_pair for split_pair in split_pairs])[0])
-            if len(idx) == 0:
-                idx = ' '
-        pairs_to_loc_idxs.extend(idx)
-
-    return pairs_to_loc_idxs # these numbers you see are the index in PAIRS frame that the localization.pairs region will get put
-
-
-def get_elec_regions(localizations,pairs): 
-    # 2020-08-13 new version after consulting with Paul 
-    # suggested order to use regions is: stein->das->MTL->wb->mni
-    
-    # 2020-08-26 previous version input tal_struct (pairs.json as a recArray). Now input pairs.json and localizations.json like this:
-    # pairs = reader.load('pairs')
-    # localizations = reader.load('localization')
-    # read about details here: https://memory-int.psych.upenn.edu/InternalWiki/index.php/RAM_data
-    
-    regs = []    
-    atlas_type = []
-    pair_number = []
-    has_stein_das = 0
-    
-    # if localization.json exists get the names from each atlas
-    if len(localizations) > 1: 
-        # pairs that were recorded and possible pairs from the localization are typically not the same.
-        # so need to translate the localization region names to the pairs...which I think is easiest to just do here
-
-        # get an index for every pair in pairs
-        loc_translation = loc_to_pairs_translation(pairs, localizations)
-        loc_dk_names = ['' for _ in range(len(pairs))]
-        loc_mtl_names = copy(loc_dk_names)
-        loc_wb_names = copy(loc_dk_names)
-        for i,loc in enumerate(loc_translation):
-            if loc != ' ': # set it to this when there was no localization.pairs
-                if 'atlases.mtl' in localizations: # a few (like 5) of the localization.pairs don't have the MTL atlas
-                    loc_mtl_names[loc] = localizations['atlases.mtl']['pairs'][i] # MTL field from pairs in localization.json
-                    has_mtl = 1
-                else:
-                    has_mtl = 0 # so can skip in below
-                loc_dk_names[loc] = localizations['atlases.dk']['pairs'][i]
-                loc_wb_names[loc] = localizations['atlases.whole_brain']['pairs'][i]   
-    for pair_ct in range(len(pairs)):
-        try:
-            pair_number.append(pair_ct) # just to keep track of what pair this was in subject
-            pair_atlases = pairs.iloc[pair_ct] #tal_struct[pair_ct].atlases
-            if 'stein.region' in pair_atlases: # if 'stein' in pair_atlases.dtype.names:
-                test_region = str(pair_atlases['stein.region'])
-                if (test_region is not None) and (len(test_region)>1) and \
-                   (test_region not in 'None') and (test_region != 'nan'):
-                    regs.append(test_region.lower())
-#             if 'stein' in pair_atlases.dtype.names:  ### OLD WAY FROM TAL_STRUCT...leaving as example
-#                 if (pair_atlases['stein']['region'] is not None) and (len(pair_atlases['stein']['region'])>1) and \
-#                    (pair_atlases['stein']['region'] not in 'None') and (pair_atlases['stein']['region'] != 'nan'):
-#                     regs.append(pair_atlases['stein']['region'].lower())
-                    atlas_type.append('stein')
-                    has_stein_das = 1 # temporary thing just to see where stein/das stopped annotating
-                    continue # back to top of for loop
-                else:
-                    pass # keep going in loop
-            if 'das.region' in pair_atlases:
-                test_region = str(pair_atlases['das.region'])
-                if (test_region is not None) and (len(test_region)>1) and \
-                   (test_region not in 'None') and (test_region != 'nan'):
-                    regs.append(test_region.lower())
-                    atlas_type.append('das')
-                    has_stein_das = 1
-                    continue
-                else:
-                    pass
-            if len(localizations) > 1 and has_mtl==1:             # 'MTL' from localization.json
-                if loc_mtl_names[pair_ct] != '' and loc_mtl_names[pair_ct] != ' ':
-                    if str(loc_mtl_names[pair_ct]) != 'nan': # looking for "MTL" field in localizations.json
-                        regs.append(loc_mtl_names[pair_ct].lower())
-                        atlas_type.append('MTL_localization')
-                        continue
-                    else:
-                        pass
-                else:
-                    pass
-            if len(localizations) > 1:             # 'whole_brain' from localization.json
-                if loc_wb_names[pair_ct] != '' and loc_wb_names[pair_ct] != ' ':
-                    if str(loc_wb_names[pair_ct]) != 'nan': # looking for "MTL" field in localizations.json
-                        regs.append(loc_wb_names[pair_ct].lower())
-                        atlas_type.append('wb_localization')
-                        continue
-                    else:
-                        pass
-                else:
-                    pass
-            if 'wb.region' in pair_atlases:
-                test_region = str(pair_atlases['wb.region'])
-                if (test_region is not None) and (len(test_region)>1) and \
-                   (test_region not in 'None') and (test_region != 'nan'):
-                    regs.append(test_region.lower())
-                    atlas_type.append('wb')
-                    continue
-                else:
-                    pass
-            if len(localizations) > 1:             # 'dk' from localization.json
-                if loc_dk_names[pair_ct] != '' and loc_dk_names[pair_ct] != ' ':
-                    if str(loc_dk_names[pair_ct]) != 'nan': # looking for "dk" field in localizations.json
-                        regs.append(loc_dk_names[pair_ct].lower())
-                        atlas_type.append('dk_localization')
-                        continue
-                    else:
-                        pass
-                else:
-                    pass
-            if 'dk.region' in pair_atlases:
-                test_region = str(pair_atlases['dk.region'])
-                if (test_region is not None) and (len(test_region)>1) and \
-                   (test_region not in 'None') and (test_region != 'nan'):
-                    regs.append(test_region.lower())
-                    atlas_type.append('dk')
-                    continue
-                else:
-                    pass
-            if 'ind.corrected.region' in pair_atlases: # I don't think this ever has a region label but just in case
-                test_region = str(pair_atlases['ind.corrected.region'])
-                if (test_region is not None) and (len(test_region)>1) and \
-                   (test_region not in 'None') and (test_region not in 'nan'):
-                    regs.append(test_region.lower())
-                    atlas_type.append('ind.corrected')
-                    continue
-                else:
-                    pass  
-            if 'ind.region' in pair_atlases:
-                test_region = str(pair_atlases['ind.region'])
-                if (test_region is not None) and (len(test_region)>1) and \
-                   (test_region not in 'None') and (test_region != 'nan'):
-                    regs.append(test_region.lower())
-                    atlas_type.append('ind')
-                    # [tal_struct[i].atlases.ind.region for i in range(len(tal_struct))] # if you want to see ind atlases for comparison to above
-                    # have to run this first though to work in pdb dubugger: globals().update(locals())                  
-                    continue
-                else:
-                    regs.append('No atlas')
-                    atlas_type.append('No atlas')
-            else: 
-                regs.append('No atlas')
-                atlas_type.append('No atlas')
-        except AttributeError:
-            regs.append('error')
-            atlas_type.append('error')
-    return np.array(regs), np.array(atlas_type), np.array(pair_number), has_stein_das
-
-def get_localization_to_pairs_translation(pairs,localizations):
-    # this does the opposite of above...don't think I'll use this one but accidentally made it first so keep it JIC
-    loc_pairs = localizations.type.pairs
-    loc_pair_labels = np.array(loc_pairs.index)
-
-    loc_to_pairs_idxs = []
-    for pair in pairs.label:
-        split_pair = pair.split('-') # split into list of 2
-        idx = np.where([split_pair==list(lp) for lp in loc_pair_labels])[0]
-        if loc_pair_labels[idx].size==0: # if didn't find it, check for reverse
-            split_pair.reverse()
-            temp_mask = [split_pair==list(lp) for lp in loc_pair_labels]
-            idx = np.where(temp_mask)[0]
-            if len(idx) == 0:
-                idx = ' '
-        loc_to_pairs_idxs.extend(idx)
-
-    return loc_to_pairs_idxs
-
-def get_tal_distmat(tal_struct):
-        
-    #Get distance matrix
-    pos = []
-    for ts in tal_struct:
-        x = ts['atlases']['ind']['x']
-        y = ts['atlases']['ind']['y']
-        z = ts['atlases']['ind']['z']
-        pos.append((x, y, z))
-    pos = np.array(pos)
-    dist_mat = np.empty((len(pos), len(pos))) # iterate over electrode pairs and build the adjacency matrix
-    dist_mat.fill(np.nan)
-    for i, e1 in enumerate(pos):
-        for j, e2 in enumerate(pos):
-            if (i <= j):
-                dist_mat[i,j] = np.linalg.norm(e1 - e2, axis=0)
-                dist_mat[j,i] = np.linalg.norm(e1 - e2, axis=0)    
-    distmat = 1./np.exp(dist_mat/120.)
-    
-    return distmat
-
-
-def correct_eeg_offset(sub,session,exp,reader,events):
-    # The EEG for recall times for many FR subjects (FR1 and catFR1 in particular) does not align with the events since the 
-    # implementation of Unity. This is a temporary fix for the EEG alignment for these subjects before
-    # the data is corrected in Rhino. Subject-by-subject details are here:
-    # https://docs.google.com/spreadsheets/d/1co5f7-dPOktGIXZJ7uptv0SwBJhf36TuhVSMFqRC0X8/edit?usp=sharing
-    # jjsakon 2020-09-22
-    # Update 2020-09-29 accounting for sampling rate and raising error if eeg events don't exist
-    
-    ## Inputs ##
-    # sub: subject name (type str)
-    # session: session number (type int)
-    # exp: experiment, typically 'FR1' or 'catFR1' (type str)
-    # reader: typical output from CMLReader function (see cmlreaders documentation)
-    # events: dataFrame from reader.load('task_events') for your *RETRIEVAL* events of choice; therefore
-    #         aligning eeg to recalls or retrieval_start (although see below program if you want to try to 
-    #         align retrieval_start to the end of the beep in addition to fixing the EEG alignment issue). 
-    #         Correction is *NOT* needed for encoding alignment
-    
-    ## Output ## 
-    # events: events with eegoffset correctly aligned to the events
-    
-    import re
-    
-    sub_num = [int(s) for s in re.findall(r'\d+',sub)] # extract number for sub   
-    
-    temp_eeg = reader.load_eeg(events=events, rel_start=0, rel_stop=100) # just to get sampling rate
-
-    sr = temp_eeg.samplerate
-    sr_factor = 1000/sr
-    
-    if sum(events.eegoffset==-1)>0:
-        raise Exception('Events without EEG (those with events.eegoffset=-1) should be removed before calling correctEEGoffset')
- 
-    if (sub in ['R1379E','R1385E','R1387E','R1394E','R1402E']) or \
-        (sub=='R1404E' and session==0 and exp=='catFR1'): 
-        # first 5 true for catFR1 and FR1. R1404E only one catFR1 session has partial beep 
-        # for these subs there is a partial beep and 500 ms of eeg lag (see "History of issues 2020-09-08" for examples)
-        
-        # add time (in units of samples) since the events are already ahead of the eeg
-        events.eegoffset = events.eegoffset+int(np.round(500/sr_factor)) # add 500 ms of lag
-        
-    # subs where unity was implemented for some sessions but not others
-    elif (sub=='R1396T' and exp=='catFR1') or (sub=='R1396T' and session==1) or \
-         (sub=='R1395M' and exp=='catFR1') or (sub=='R1395M' and exp=='FR1' and session>0):
-        events.eegoffset = events.eegoffset+int(np.round(1000/sr_factor))
-    
-    # do nothing since these sessions were pyEPL so the offset is okay
-    elif (sub=='R1406M' and session==0) or (sub=='R1415T' and session==0 and exp=='FR1') or (sub=='R1422T' and exp=='FR1') or \
-         sub_num[0]>=1525: # and any sub after R1525J is when we caught he mistake and realigned asterisks_off/beep_off/RET_START
-        pass
- 
-    # remaining unity subs
-    elif sub_num[0]>=1397 or sub == 'R1389J': 
-        events.eegoffset = events.eegoffset+int(np.round(1000/sr_factor))
-        
-    return events
-
-
-def get_bad_channels(tal_struct,elecs_cat,remove_soz_ictal):
-    # get the bad channels and soz/ictal/lesion channels from electrode_categories.txt files
-    
-    # 2021-03-15 rewriting this to put 0 for good electrode, 1 for SOZ, and 2 for bad_electrodes (bad leads or the like)
-    # 2022-02-04 this makes more sense to use remove_soz_ictal with 1 for bad_electrodes or SOZ
-    # 2022-05-09 fixed the logic so can just keep those channels with bad_bp_mask[channel] == 0
-    
-    if remove_soz_ictal == 2:
-        bad_bp_mask = np.ones(len(tal_struct)) # for this one want to keep ONLY SOZ sites
-    else:
-        bad_bp_mask = np.zeros(len(tal_struct))
-        
-    if elecs_cat != []:
-
-        bad_elecs = elecs_cat['bad_channel']
-        soz_elecs = elecs_cat['soz'] # + elecs_cat['interictal'] only removing SOZ 2021-03-15
-
-        for idx,tal_row in enumerate(tal_struct):
-            elec_labels = tal_row['tagName'].split('-')
-            # if there are dashes in the monopolar elec names, need to fix that
-            if (len(elec_labels) > 2) & (len(elec_labels) % 2 == 0): # apparently only one of these so don't need an else
-                n2 = int(len(elec_labels)/2)
-                elec_labels = ['-'.join(elec_labels[0:n2]), '-'.join(elec_labels[n2:])]
-
-            if elec_labels[0] in bad_elecs or elec_labels[1] in bad_elecs:
-                bad_bp_mask[idx] = 2 # 2 for bad elecs/bad leads
-            if elec_labels[0] in soz_elecs or elec_labels[1] in soz_elecs:
-                if remove_soz_ictal == 1:
-                    bad_bp_mask[idx] = 1 # if not removing SOZ then just leave as 0
-                elif remove_soz_ictal == 2:
-                    bad_bp_mask[idx] = 0 # for this one want to keep ONLY SOZ sites
-            
-    return bad_bp_mask
-
-# def get_start_end_arrays(ripple_array):
-#     """
-#     Get separate arrays of SWR starts and SWR ends from the full binary array
-#     """
-#
-#     # Shift the ripple array to the right and left by one position
-#     shifted_right = np.roll(ripple_array, shift=1, axis=1)
-#     shifted_left = np.roll(ripple_array, shift=-1, axis=1)
-#
-#     # Find the start by looking for a transition from 0 to 1
-#     start_array = (ripple_array == 1) & (shifted_right == 0)
-#     start_array[:, 0] = ripple_array[:, 0]  # Handle the edge case for the first column
-#
-#     # Find the end by looking for a transition from 1 to 0
-#     end_array = (ripple_array == 1) & (shifted_left == 0)
-#     end_array[:, -1] = ripple_array[:, -1]  # Handle the edge case for the last column
-#
-#     return start_array.astype('uint8'), end_array.astype('uint8')
+    return start_array.astype('uint8'), end_array.astype('uint8')
 
 
 def get_start_end_arrays(ripple_array):
@@ -433,15 +88,30 @@ def get_start_end_arrays(ripple_array):
 
     num_trials = ripple_array.shape[0]
     for trial in range(num_trials):
-        ripplelogictrial = ripple_array[trial]
-        starts, ends = get_logical_chunks(ripplelogictrial)
-        temp_row = np.zeros(len(ripplelogictrial))
+        ripple_logic = ripple_array[trial]
+        starts, ends = get_logical_chunks2(ripple_logic)
+        temp_row = np.zeros(len(ripple_logic))
         temp_row[starts] = 1
         start_array[trial] = temp_row  # time when each SWR starts
-        temp_row = np.zeros(len(ripplelogictrial))
+        temp_row = np.zeros(len(ripple_logic))
         temp_row[ends] = 1
         end_array[trial] = temp_row
     return start_array, end_array
+
+
+def filter_ied(eeg_ied, sample_rate, trans_width):
+
+    eeg_ied = eeg_ied ** 2  # already rectified now square
+    nyquist = sample_rate / 2
+    ntaps40, beta40 = kaiserord(40, trans_width / nyquist)
+    kaiser_40lp_filter = firwin(ntaps40, cutoff=40, window=('kaiser', beta40), scale=False, fs=sample_rate,
+                                pass_zero='lowpass')
+    eeg_ied = filtfilt(kaiser_40lp_filter, 1., eeg_ied)  # low pass filter
+    mean1 = np.mean(eeg_ied)
+    std1 = np.std(eeg_ied)
+    iedlogic = eeg_ied >= mean1 + 4 * std1  # Norman et al 2019
+
+    return iedlogic
 
 
 def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
@@ -462,8 +132,8 @@ def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
     ripple_max = 250/sr_factor #200/sr_factor
     min_separation = 30/sr_factor # peak to peak
     orig_eeg_rip = copy(eeg_rip)
-    clip_SD = np.mean(eeg_rip) + candidate_sd * np.std(eeg_rip)
-    eeg_rip[eeg_rip>clip_SD] = clip_SD # clip at 3SD since detecting at 3 SD now
+    clip_sd = np.mean(eeg_rip) + candidate_sd * np.std(eeg_rip)
+    eeg_rip[eeg_rip > clip_sd] = clip_sd # clip at 3SD since detecting at 3 SD now
     eeg_rip = eeg_rip**2 # square
     
     # FIR lowpass 40 hz filter for Norman dtection algo
@@ -489,7 +159,7 @@ def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
     trial_length = ripplelogic.shape[1]
     for trial in range(num_trials):
         ripplelogictrial = ripplelogic[trial]
-        starts,ends = get_logical_chunks(ripplelogictrial)
+        starts,ends = get_logical_chunks2(ripplelogictrial)
         data_trial = orig_eeg_rip[trial]
         for i,start in enumerate(starts):
             current_time = 0
@@ -510,10 +180,10 @@ def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
             
         # remove any duplicates from starts and ends
         starts = np.array(starts); ends = np.array(ends)
-        _,start_idxs = np.unique(starts, return_index=True)
-        _,end_idxs = np.unique(ends, return_index=True)
-        starts = starts[start_idxs & end_idxs]
-        ends = ends[start_idxs & end_idxs]
+        _,start_idx = np.unique(starts, return_index=True)
+        _,end_idx = np.unique(ends, return_index=True)
+        starts = starts[start_idx & end_idx]
+        ends = ends[start_idx & end_idx]
 
         # remove ripples <min or >max length
         lengths = ends-starts
@@ -547,68 +217,66 @@ def detect_ripples_butter(eeg_rip, eeg_ied, eeg_mne, sr):  # ,mstimes):
     # input: hilbert amp from 80-120 Hz, hilbert amp from 250-500 Hz, raw eeg. All trials X duration (ms),mstime of each FR event
     # output: ripplelogic and iedlogic, which are trials X duration masks of ripple presence 
     # note: can get all ripple starts/ends using getLogicalChunks custom function
-    from scipy import signal,stats
+    from scipy import signal, stats
 
-    sr_factor = 1000/sr # have to account for sampling rate since using ms times 
-    ripplewidth = 25/sr_factor # ms
-    ripthresh = 2 # threshold detection
-    ripmaxthresh = 3 # ripple event must meet this maximum
-    ied_thresh = 5 # from Staresina, NN 2015 IED rejection
-    ripple_separation = 15/sr_factor # from Roux, NN 2017
-    artifact_buffer = 100 # per Vaz et al 2019 
+    sr_factor = 1000/sr  # have to account for sampling rate since using ms times
+    ripplewidth = 25/sr_factor  # ms
+    ripthresh = 2  # threshold detection
+    ripmaxthresh = 3  # ripple event must meet this maximum
+    ied_thresh = 5  # from Staresina, NN 2015 IED rejection
+    ripple_separation = 15/sr_factor  # from Roux, NN 2017
+    artifact_buffer = 100  # per Vaz et al 2019
 
     num_trials = eeg_mne.shape[0]
-    eeg_rip_z = stats.zscore(eeg_rip,axis=None) # note that Vaz et al averaged over time bins too, so axis=None instead of 0
+    eeg_rip_z = stats.zscore(eeg_rip,axis=None)  # note that Vaz et al averaged over time bins too, so axis=None instead of 0
     eeg_ied_z = stats.zscore(eeg_ied,axis=None)
-    eeg_diff = np.diff(eeg_mne) # measure eeg gradient and zscore too
-    eeg_diff = np.column_stack((eeg_diff,eeg_diff[:,-1]))# make logical arrays same size
+    eeg_diff = np.diff(eeg_mne)  # measure eeg gradient and zscore too
+    eeg_diff = np.column_stack((eeg_diff,eeg_diff[:,-1]))  # make logical arrays same size
     eeg_diff = stats.zscore(eeg_diff,axis=None)
 
     # convert to logicals and remove IEDs
-    ripplelogic = eeg_rip_z>ripthresh
-    broadlogic = eeg_ied_z>ied_thresh 
-    difflogic = abs(eeg_diff)>ied_thresh
-    iedlogic = broadlogic | difflogic # combine artifactual ripples
-    iedlogic = signal.convolve2d(iedlogic,np.ones((1,artifact_buffer)),'same')>0 # expand to +/- 100 ms
-    ripplelogic[iedlogic==1] = 0 # remove IEDs
+    ripple_logic = eeg_rip_z > ripthresh
+    broadlogic = eeg_ied_z > ied_thresh
+    difflogic = abs(eeg_diff) > ied_thresh
+    iedlogic = broadlogic | difflogic  # combine artifactual ripples
+    iedlogic = signal.convolve2d(iedlogic, np.ones((1, artifact_buffer)),'same') > 0  # expand to +/- 100 ms
+    ripple_logic[iedlogic==1] = 0  # remove IEDs
 
     # loop through trials and remove ripples
     for trial in range(num_trials):
-        ripplelogictrial = ripplelogic[trial]        
+        ripplelogictrial = ripple_logic[trial]
         if np.sum(ripplelogictrial)==0:
             continue
         hilbamptrial = eeg_rip_z[trial]
 
-        starts,ends = get_logical_chunks(ripplelogictrial)  # get chunks of 1s that are putative SWRs
+        starts,ends = get_logical_chunks2(ripplelogictrial)  # get chunks of 1s that are putative SWRs
         for ripple in range(len(starts)):
             if ends[ripple]+1-starts[ripple] < ripplewidth or \
             max(abs(hilbamptrial[starts[ripple]:ends[ripple]+1])) < ripmaxthresh:
                 ripplelogictrial[starts[ripple]:ends[ripple]+1] = 0
-        ripplelogic[trial] = ripplelogictrial # reassign trial with ripples removed
+        ripple_logic[trial] = ripplelogictrial # reassign trial with ripples removed
 
     # join ripples less than 15 ms separated 
     for trial in range(num_trials):
-        ripplelogictrial = ripplelogic[trial]
+        ripplelogictrial = ripple_logic[trial]
         if np.sum(ripplelogictrial)==0:
             continue
-        starts,ends = get_logical_chunks(ripplelogictrial)
+        starts,ends = get_logical_chunks2(ripplelogictrial)
         if len(starts)<=1:
             continue
         for ripple in range(len(starts)-1): # loop through ripples before last
             if (starts[ripple+1]-ends[ripple]) < ripple_separation:            
                 ripplelogictrial[ends[ripple]+1:starts[ripple+1]] = 1
-        ripplelogic[trial] = ripplelogictrial # reassign trial with ripples removed      
+        ripple_logic[trial] = ripplelogictrial # reassign trial with ripples removed
     
-    return ripplelogic,iedlogic  # ripple_mstimes
+    return ripple_logic, iedlogic  # ripple_mstimes
 
 
 def detect_ripples_staresina(eeg_rip, sr):
     # detect ripples using Staresina et al 2015 NatNeuro algo
     window_size = 20 # in ms
     min_duration = 38 # 38 ms
-
     sr_factor = 1000/sr
-
     rip2 = np.power(eeg_rip,2)
     window = np.ones(int(window_size/sr_factor))/float(window_size/sr_factor)
     rms_values = []
@@ -620,23 +288,22 @@ def detect_ripples_staresina(eeg_rip, sr):
     binary_array = rms_values >= rms_thresh
 
     # now find those with minimum duration between start/end for each trial and if they have 3 peaks/troughs keep them
-
-    ripplelogic = np.zeros((np.shape(binary_array)[0],np.shape(binary_array)[1]))
+    ripple_logic = np.zeros((np.shape(binary_array)[0], np.shape(binary_array)[1]))
     for i_trial in range(len(binary_array)):
         binary_trial = binary_array[i_trial]
-        starts,ends = get_logical_chunks(binary_trial)
+        starts,ends = get_logical_chunks2(binary_trial)
         candidate_events = (np.array(ends)-np.array(starts)+1)>=(min_duration/sr_factor)
         starts = np.array(starts)[candidate_events]
         ends = np.array(ends)[candidate_events]
         ripple_trial = np.zeros(len(binary_trial))
         for i_cand in range(len(starts)):
-            # get raw eeg plus half of moving window. idx shouldn't get past end since ripplelogic is smaller than eeg_rip
+            # get raw eeg plus half of moving window. idx shouldn't get past end since ripple_logic is smaller than eeg_rip
             eeg_segment = eeg_rip[i_trial].values[int(starts[i_cand]+window_size/sr_factor/2-1):int(ends[i_cand]+window_size/sr_factor/2+1)] # add point on either side for 3 MA filter 
             peaks,_ = lmax(eeg_segment,3) # Matlab function suggested by Bernhard I rewrote for Python. Basically a moving average 3 filter to find local maxes
             troughs,_ = lmin(eeg_segment,3)
-            if ((len(peaks)>=3) | (len(troughs)>=3)):
-                ripplelogic[i_trial,starts[i_cand]:ends[i_cand]] = 1
-    return ripplelogic
+            if (len(peaks)>=3) | (len(troughs)>=3):
+                ripple_logic[i_trial, starts[i_cand]:ends[i_cand]] = 1
+    return ripple_logic
 
 
 def downsample_binary(array, factor):
@@ -692,6 +359,7 @@ def fastSmooth(a,window_size): # I ended up not using this one. It's what Norman
     stop = (np.cumsum(a[:-window_size:-1])[::2]/r)[::-1]
     return np.concatenate((  start , out0, stop  ))
 
+
 def triangleSmooth(data,smoothing_triangle): # smooth data with triangle filter using padded edges
     
     # problem with this smoothing is when there's a point on the edge it gives too much weight to 
@@ -711,6 +379,7 @@ def triangleSmooth(data,smoothing_triangle): # smooth data with triangle filter 
     padded = np.pad(data, factor, mode='edge') # pads same value either side
     smoothed_data = np.convolve(padded, triangle_filter, mode='valid')
     return smoothed_data
+
 
 def fullPSTH(point_array,binsize,smoothing_triangle,sr,start_offset):
     # point_array is binary point time (spikes or SWRs) v. trial
@@ -736,30 +405,34 @@ def fullPSTH(point_array,binsize,smoothing_triangle,sr,start_offset):
         PSTH = triangleSmooth(norm_count,smoothing_triangle)
     return PSTH,bin_centers
 
-def binBinaryArray(start_array,bin_size,sr_factor):
+
+def binBinaryArray(start_array, bin_size, sr_factor):
     # instead of PSTH, get a binned binary array that keeps the trials but bins over time
-    bin_in_sr = bin_size/sr_factor
-    bins = np.arange(0,start_array.shape[1],bin_in_sr) #start_array.shape[1]/bin_size*sr_factor
-    
+    bin_in_sr = bin_size / sr_factor
+    bins = np.arange(0, start_array.shape[1], bin_in_sr)  # start_array.shape[1]/bin_size*sr_factor
+
     # only need to do this for ripples (where bin_size is 100s of ms). For z-scores (which is already averaged) don't convert
-    if bin_size > 50: # this is just a dumb way to make sure it's not a z-score
-        bin_to_hz = 1000/bin_size*bin_in_sr # factor that converts binned matrix to Hz
+    if bin_size > 50:  # this is just a dumb way to make sure it's not a z-score
+        bin_to_hz = 1000 / bin_size * bin_in_sr  # factor that converts binned matrix to Hz
     else:
         bin_to_hz = 1
-    binned_array = np.zeros((start_array.shape[0], num_bins))
-    # note this will be at instantaeous rate bin_in_sr multiple lower (e.g. 100 ms bin/2 sr = 50x)
 
-    for i, row in enumerate(start_array):
-        for j, start in enumerate(bins[:-1]):
-            binned_array[i, j] = bin_to_hz * np.mean(row[int(start):int(start + bin_in_sr)])
+    # this will be at instantaneous rate bin_in_sr multiple lower (e.g. 100 ms bin/2 sr = 50x)
+    binned_array = []
 
+    for row in start_array:
+        temp_row = []
+        for time_bin in bins:
+            temp_row.append(bin_to_hz * np.mean(row[int(time_bin):int(time_bin + bin_in_sr)]))
+        binned_array = superVstack(binned_array, temp_row)
     return binned_array
 
-def getSubSessPredictors(sub_names,sub_sess_names,trial_nums,electrode_labels,channel_coords):
-    '''
+
+def getSubSessPredictors(sub_names, sub_sess_names, trial_nums, electrode_labels, channel_coords):
+    """
      get arrays of predictors for each trial so can set up ME model
     2020-08-31 get electrode labels too
-    '''
+    """
     
     subject_name_array = []
     session_name_array = []
@@ -806,8 +479,6 @@ def getSubSessPredictorsWithChannelNums(sub_names,sub_sess_names,trial_nums,elec
 def getMixedEffectCIs(binned_start_array,subject_name_array,session_name_array):
     # take a binned array of ripples and find the mixed effect confidence intervals
     # note that output is the net ± distance from mean
-    import statsmodels.formula.api as smf
-
     # now, to set up ME regression, append each time_bin to bottom and duplicate
     mean_values = []
     CIs = []
@@ -830,8 +501,6 @@ def getMixedEffectCIs(binned_start_array,subject_name_array,session_name_array):
 def getMixedEffectSEs(binned_start_array,subject_name_array,session_name_array):
     # take a binned array of ripples and find the mixed effect SEs at each bin
     # note that output is the net ± distance from mean
-    import statsmodels.formula.api as smf
-
     # now, to set up ME regression, append each time_bin to bottom and duplicate
     mean_values = []
     SEs = [] #CIs = []
@@ -852,8 +521,6 @@ def getMixedEffectSEs(binned_start_array,subject_name_array,session_name_array):
 def getMixedEffectMeanSEs(binned_start_array,subject_name_array,session_name_array,elec_name_array = []):
     # take a binned array of ripples and find the mixed effect SEs at each bin
     # note that output is the net ± distance from mean
-    import statsmodels.formula.api as smf
-
     # now, to set up ME regression, append each time_bin to bottom and duplicate
     mean_values = []
     SEs = [] #CIs = []
@@ -897,8 +564,7 @@ def fixSEgaps(SE_plot):
 
 def MEstatsAcrossBins(binned_start_array,subject_name_array,session_name_array):
     # returns mixed effect model for the given trial X bins array by comparing bins
-    import statsmodels.formula.api as smf
-    
+
     bin_label = []
     session_name = []
     subject_name = []
@@ -922,8 +588,7 @@ def MEstatsAcrossBins(binned_start_array,subject_name_array,session_name_array):
 
 def MEstatsAcrossCategories(binned_recalled_array,sub_recalled,sess_recalled,binned_forgot_array,sub_forgot,sess_forgot):
     # here looking at only a single bin but now comparing across categories (e.g. remembered v. forgotten)
-    import statsmodels.formula.api as smf
-    
+
     category_label = []
     session_name = []
     subject_name = []
@@ -1063,6 +728,7 @@ def getRepFRRepeatArray(session_name_array,list_num_key,session_events):
 
     return repeat_array
 
+
 def bootPSTH(point_array,binsize,smoothing_triangle,sr,start_offset): # same as above, but single output so can bootstrap
     # point_array is binary point time (spikes or SWRs) v. trial
     # binsize in ms, smoothing_triangle is how many points in triangle kernel moving average
@@ -1077,23 +743,18 @@ def bootPSTH(point_array,binsize,smoothing_triangle,sr,start_offset): # same as 
     edges = np.arange(0,last_bin+binsize,binsize)
     bin_centers = edges[0:-1]+binsize/2+start_offset
 
-    count = np.histogram(xtimes,bins=edges);
+    count = np.histogram(xtimes,bins=edges)
     norm_count = count/np.array((num_trials*binsize/1000))
     #smoothed = fastSmooth(norm_count[0],5) # use triangular instead, although this gives similar answer
     PSTH = triangleSmooth(norm_count[0],smoothing_triangle)
     return PSTH
+
 
 def makePairwiseComparisonPlot(comp_data,comp_names,col_names,figsize=(7,5)):
     # make a pairwise comparison errorbar plot with swarm and FDR significance overlaid
     # comp_data: list of vectors of pairwise comparison data
     # comp_names: list of labels for each pairwise comparison
     # col_names: list of 2 names: 1st is what is in data, 2nd is what the grouping of the labels 
-    
-    import pandas as pd
-    from scipy.stats import ttest_1samp
-    from statsmodels.stats.multitest import fdrcorrection
-    import matplotlib.pyplot as plt
-    import seaborn as sb
 
     # make dataframe
     comp_df = pd.DataFrame(columns=col_names)
@@ -1134,25 +795,6 @@ def makePairwiseComparisonPlot(comp_data,comp_names,col_names,figsize=(7,5)):
     print(fdr_pvalues)
     return fdr_pvalues
 
-
-def SubjectDataFrames(sub_list):
-    if isinstance(sub_list, str):
-        sub_list = [sub_list]
-    
-    df = get_data_index('all')
-    indices_list = [df['subject']==sub for sub in sub_list]
-    indices = functools.reduce(lambda x,y: x|y, indices_list)
-    df_matched = df[indices]
-    return df_matched
-
-
-def GetElectrodes(sub,start,stop):
-    df_sub = SubjectDataFrames(sub)
-    reader = CMLReadDFRow(next(df_sub.itertuples()))
-    evs = reader.load('events')
-    enc_evs = evs[evs.type=='WORD']
-    eeg = reader.load_eeg(events=enc_evs, rel_start=start, rel_stop=stop, clean=True)
-    return eeg.to_ptsa().channel.values
 
 def MakeLocationFilter(scheme, location):
     return [location in s for s in [s if s else '' for s in scheme.iloc()[:]['ind.region']]]
@@ -1214,6 +856,7 @@ def lmax(x,filt):
 
     return lmval,indd
 
+
 def lmin(x,filt):
     # translated from Matlab by J. Sakon 2021-11-16. See lmax above for description
     
@@ -1256,6 +899,7 @@ def lmin(x,filt):
 
     return lmval,indd
 
+
 class SubjectStats():
     def __init__(self):
         self.sessions = 0
@@ -1296,46 +940,7 @@ class SubjectStats():
     
     def RecallFraction(self):
         return np.sum(self.recalled)/np.sum(self.num_words_presented)
-    
-def SubjectStatTable(subjects):
-    """ Prepare LaTeX table of subject stats """
 
-    table = ''
-    try:
-        table += '\\begin{tabular}{lrrrrrr}\n'
-        table += ' & '.join('\\textbf{{{0}}}'.format(h) for h in [
-            'Subject',
-            '\\# Sessions',
-            '\\# Lists',
-            'Avg Recalled',
-            'Prior Intrusions',
-            'Extra Intrusions',
-            'Repeats'
-        ])
-        table += ' \\\\\n'
-
-        for sub in subjects:
-            df_sub = SubjectDataFrames(sub) # at this level 
-            stats = SubjectStats()
-            for row in df_sub.itertuples():
-                reader = CMLReadDFRow(row) # "row" is whole row of dataframe (1 session in this case)
-                evs = reader.load('task_events')
-                stats.Add(evs)
-            table += ' & '.join([sub, str(stats.sessions)] +
-                ['{:.2f}'.format(x) for x in [
-                    np.mean(stats.lists),
-                    stats.ListAvg(stats.recalled),
-                    stats.ListAvg(stats.intrusions_prior),
-                    stats.ListAvg(stats.intrusions_extra),
-                    stats.ListAvg(stats.repeats)
-                ]]) + ' \\\\\n'
-        
-        table += '\\end{tabular}\n'
-    except Exception as e:
-        print (table)
-        
-    
-    return table  
 
 def get_power(eeg, tstart, tend, freqs=[5,8]):
 
@@ -1347,6 +952,7 @@ def get_power(eeg, tstart, tend, freqs=[5,8]):
                                       tmax=tend, verbose=False)  #power is (events, elecs, freqs)
     theta_pow_avg = np.mean(theta_pow, -1)  #Average across freq_bands
     return theta_pow_avg.squeeze(), fdone
+
 
 def ClusterRun(function, parameter_list, max_cores=1000):
 
@@ -1400,6 +1006,7 @@ def ClusterRun(function, parameter_list, max_cores=1000):
 def z_score_epochs(power):
     # power should be a 3d array of shape num_trials x num_channels x num_timesteps
     return (power - np.mean(power, axis=(0,2), keepdims=True)) / np.std(np.mean(power, axis=2, keepdims=True),axis=0, keepdims=True) 
+
 
 def compute_morlet(eeg, freqs, sr, desired_sr, n_jobs, tmin, tmax, mode='power', split_power_idx=None):
     """

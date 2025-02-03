@@ -1,6 +1,6 @@
 ## These are general .py programs written to be used across all programs ##
 # 2020-01-09 JS
-
+from typing import Tuple
 import numpy as np
 import os
 
@@ -234,6 +234,22 @@ def get_logical_chunks(array):
             startindex = 0
             endindex = 0  
     return starts,ends
+
+
+def get_logical_chunks2(array: np.array) -> Tuple[np.array, np.array]:
+    # find start and end indices for chunks of values >0 in an array
+    if any(array < 0):
+        raise ValueError("negative values exist in array!")
+
+    is_positive = array > 0
+    is_positive = np.append(is_positive, 0)
+    is_positive = np.insert(is_positive, 0, 0)
+
+    diff = np.diff(is_positive)
+    start = np.where(diff == 1)[0]
+    end = np.where(diff == -1)[0] - 1
+    return list(start), list(end)
+
 
 def bootstrap(data, bootnum=100, samples=None, bootfunc=None):
     """Performs bootstrap resampling on numpy arrays.

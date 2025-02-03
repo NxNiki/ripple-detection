@@ -20,7 +20,7 @@ from ptsa.data.timeseries import TimeSeries
 from ripple_detection.general import superVstack
 from ripple_detection.slow_wave_ripple import (
     detect_ripples_hamming, detect_ripples_butter, detect_ripples_staresina,
-    downsample_binary, getStartEndArrays
+    downsample_binary, get_start_end_arrays
 )
 from ripple_detection.neuralynx_io import load_ncs
 from ripple_detection.filters import butter_filter
@@ -159,7 +159,7 @@ for channel in range(np.shape(eeg_rip_band.get_data())[1]):  # unpack number of 
         ripplelogic = np.expand_dims(ripplelogic, axis=0)
 
     # skip this electrode if the ripple rate is below threshold
-    temp_start_array, _ = getStartEndArrays(ripplelogic)
+    temp_start_array, _ = get_start_end_arrays(ripplelogic)
     elec_ripple_rate = np.sum(temp_start_array) / temp_start_array.shape[0] / time_length
 
     if elec_ripple_rate < min_ripple_rate:
