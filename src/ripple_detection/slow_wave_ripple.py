@@ -9,7 +9,7 @@ from copy import copy
 import functools
 import datetime
 import scipy
-from scipy.signal import firwin, filtfilt, kaiserord, convolve2d
+from scipy.signal import firwin, filtfilt, kaiserord, convolve2d, resample
 from scipy.stats import ttest_1samp
 import statsmodels.formula.api as smf
 from statsmodels.stats.multitest import fdrcorrection
@@ -114,7 +114,7 @@ def filter_ied(eeg_ied, sample_rate, trans_width):
     return iedlogic
 
 
-def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
+def detect_ripples_hamming(eeg_rip, trans_width, sr, ied_logic):
     """
     detect ripples similar to with Butterworth, but using Norman et al. 2019 algo (based on Stark 2014 algo). Description:
     Then Hilbert, clip extreme to 4 SD, square this clipped, smooth w/ Kaiser FIR low-pass filter with 40 Hz cutoff,
@@ -151,15 +151,15 @@ def detect_ripples_hamming(eeg_rip, trans_width, sr, iedlogic):
     expansion_thresh = mean_detection_thresh+2*std_detection_thresh
     ripplelogic = orig_eeg_rip >= candidate_thresh # EF1208, will evaluate to squared signal is above threshold
     # remove IEDs detected from Norman 25-60 algo...maybe should do this after expansion to 2SD??
-    iedlogic = convolve2d(iedlogic,np.ones((1,artifact_buffer)),'same')>0 # expand to +/- 50 ms from each ied point
-    ripplelogic[iedlogic==1] = 0 # EF1208, convert above threshold events to 0 if they are an IED
+    ied_logic = convolve2d(ied_logic, np.ones((1, artifact_buffer)), 'same') > 0 # expand to +/- 50 ms from each ied point
+    ripplelogic[ied_logic == 1] = 0 # EF1208, convert above threshold events to 0 if they are an IED
     
     # expand out to 2SD around surviving events
     num_trials = ripplelogic.shape[0]
     trial_length = ripplelogic.shape[1]
     for trial in range(num_trials):
-        ripplelogictrial = ripplelogic[trial]
-        starts,ends = get_logical_chunks2(ripplelogictrial)
+        ripple_logic_trial = ripplelogic[trial]
+        starts,ends = get_logical_chunks2(ripple_logic_trial)
         data_trial = orig_eeg_rip[trial]
         for i,start in enumerate(starts):
             current_time = 0
@@ -311,15 +311,19 @@ def downsample_binary(array, factor):
     array_save = np.array([])
     if factor-int(factor) == 0:  # if an integer
         for t in range(array.shape[0]):  # from https://stackoverflow.com/questions/20322079/downsample-a-1d-numpy-array
-            array_save = superVstack(array_save, array[t].reshape(-1, int(factor)).mean(axis=1))
+            array_t = array[t].squeeze()
+            remainder = len(array_t) % factor
+            if remainder != 0:
+                padding_length = int(factor - remainder)
+                array_t = np.append(array_t, [int(0)] * padding_length)
+            array_save = superVstack(array_save, np.mean(array_t.reshape(-1, int(factor)), axis=1))
     else:
         # when dividing by non-integer, can just use FFT and round to get new sampling
-        from scipy.signal import resample
         if array.shape[1]/factor-int(array.shape[1]/factor) != 0:
             print('Did not get whole number array for down sampling...rounding to nearest 100')
         new_sampling = int(round((array.shape[1]/factor)/100))*100
         for t in range(array.shape[0]):
-            array_save = superVstack(array_save,np.round(resample(array[t],new_sampling)))
+            array_save = superVstack(array_save, np.round(resample(array[t], new_sampling)))
     return array_save
 
 

@@ -116,7 +116,7 @@ session_ripple_rate_by_elec = []
 
 total_channel_ct = 0
 min_ripple_rate = 0.1  # Hz. # 0.1 for hamming
-# max_ripple_rate = 1.5 # Hz. # 1.5 for hamming
+# MAX_RIPPLE_RATE = 1.5 # Hz. # 1.5 for hamming
 max_ripple_rate = 1.5  # Hz. # 1.5 for hamming
 
 max_trial_by_trial_correlation = 0.05  # if ripples correlated more than this remove them # 0.05 for hamming

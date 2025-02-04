@@ -26,19 +26,19 @@ pd.set_option('display.max_columns', 30)
 pd.set_option('display.max_rows', 100)
 
 TRANS_WIDTH = 5.  # Width of transition region, normalized so that 1 corresponds to pi radians/sample.
-save_values = 0
-recall_type_switch = 0
-remove_soz_ictal = 0  # 0: nothing, 1: remove SOZ, 2: keep ONLY SOZ
-filter_type = 'hamming'
+# save_values = 0
+# recall_type_switch = 0
+# remove_soz_ictal = 0  # 0: nothing, 1: remove SOZ, 2: keep ONLY SOZ
 # filter_type = 'butter'
 
-eeg_buffer = 300  # buffer to add to either end of IRI when processing eeg
+# eeg_buffer = 300  # buffer to add to either end of IRI when processing eeg
 
-min_ripple_rate = 0.01  # Hz. # 0.1 for hamming, changed to .01 as ripple rate is ~ 4 times smaller than John's result.
-max_ripple_rate = 1.5  # Hz. # 1.5 for hamming
+MIN_RIPPLE_RATE = 0.1  # Hz. # 0.1 for hamming
+MAX_RIPPLE_RATE = 1.5  # Hz. # 1.5 for hamming
 
 max_trial_correlation = 0.05  # if ripples correlated more than this remove them # 0.05 for hamming
 max_electrode_correlation = 0.2  # ??? # 0.2 for hamming
+filter_type = 'hamming'
 
 
 def load_data(file_path: str, file_names: List[List[str]]) -> Tuple[np.ndarray, int]:
@@ -71,6 +71,7 @@ def filter_data(macro_data: np.ndarray, sample_rate: int, channel_names, channel
     ntaps = (2/3)*np.log10(1/(10*(1e-3*1e-4)))*(sample_rate / TRANS_WIDTH)  # gives 400 with sr=500, trans=5
 
     # filter for ripples using filter selected above
+    print(f"filter csc data with {filter_type} method...")
     if filter_type == 'hamming':
         # need to subtract out to get the filtered signal since default is bandstop but want to keep it as PTSA
         filter_window = firwin(int(ntaps + 1), [70., 178.], fs=sample_rate, window='hamming', pass_zero='bandstop')
@@ -144,11 +145,11 @@ def get_ripple_stats(eeg_ripple, eeg_ied_band, sample_rate) -> np.ndarray:
         ripple_rate = calculate_ripple_rate(ripple_logic, time_length)
         print(f"ripple rate: {ripple_rate}")
 
-        if ripple_rate < min_ripple_rate:
-            print(f'skipped b/c {ripple_rate} below ripple rate thresh {min_ripple_rate} for channel: {channel}')
+        if ripple_rate < MIN_RIPPLE_RATE:
+            print(f'skipped b/c {ripple_rate} below ripple rate thresh {MIN_RIPPLE_RATE} for channel: {channel}')
             continue
-        elif ripple_rate > max_ripple_rate:
-            print(f'skipped b/c {ripple_rate} ABOVE ripple rate thresh {max_ripple_rate} for channel: {channel}')
+        elif ripple_rate > MAX_RIPPLE_RATE:
+            print(f'skipped b/c {ripple_rate} ABOVE ripple rate thresh {MAX_RIPPLE_RATE} for channel: {channel}')
             continue
 
         # check the ripples for this electrode and make sure they're not super correlated across trials
@@ -187,7 +188,7 @@ def calculate_ripple_rate(ripple_logic, time_length):
 
 if __name__ == '__main__':
 
-    path = '../test/data/'
+    path = '../../test/data/'
     # each pair will be subtracted for bipolar referencing
     filenames = [
         ['LAH1.ncs', 'LAH2.ncs'],
