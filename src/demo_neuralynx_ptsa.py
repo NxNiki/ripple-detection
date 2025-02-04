@@ -24,7 +24,7 @@ from ripple_detection.slow_wave_ripple import (
 )
 from ripple_detection.neuralynx_io import load_ncs
 from ripple_detection.filters import butter_filter
-from ripple_detection.utils import create_mne_raw, create_mne_epoch_array
+from ripple_detection.mne_utils import create_mne_raw, create_mne_epoch_array
 
 warnings.filterwarnings("ignore") # neuralynx_io gives annoying warnings but seems to work fine
 
