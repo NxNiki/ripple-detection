@@ -83,19 +83,14 @@ def get_start_end_arrays2(ripple_array):
 
 
 def get_start_end_arrays(ripple_array):
-    start_array = np.zeros((ripple_array.shape), dtype='uint8')
-    end_array = np.zeros((ripple_array.shape), dtype='uint8')
+    start_array = np.zeros(ripple_array.shape, dtype=bool)
+    end_array = np.zeros(ripple_array.shape, dtype=bool)
 
-    num_trials = ripple_array.shape[0]
+    num_trials, num_samples = ripple_array.shape
     for trial in range(num_trials):
-        ripple_logic = ripple_array[trial]
-        starts, ends = get_logical_chunks2(ripple_logic)
-        temp_row = np.zeros(len(ripple_logic))
-        temp_row[starts] = 1
-        start_array[trial] = temp_row  # time when each SWR starts
-        temp_row = np.zeros(len(ripple_logic))
-        temp_row[ends] = 1
-        end_array[trial] = temp_row
+        starts, ends = get_logical_chunks2(ripple_array[trial])
+        start_array[trial][starts] = 1  # time when each SWR starts
+        end_array[trial][ends] = 1
     return start_array, end_array
 
 

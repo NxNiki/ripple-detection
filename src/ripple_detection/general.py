@@ -2,6 +2,8 @@
 # 2020-01-09 JS
 from typing import Tuple
 import numpy as np
+import matplotlib.pyplot as plt
+from cmlreaders import CMLReader, get_data_index
 import os
 
 def listUnion(li1, li2): # union of two lists
@@ -44,7 +46,6 @@ def natural_keys(text):
     return [ atoi(c) for c in re.split(r'(\d+)', text) ]
 
 def CMLReadDFRow(row):
-    from cmlreaders import CMLReader, get_data_index
     ''' # Use like this:
         for row in df.itertuples():
             reader = CMLReadDFRow(row)
@@ -349,6 +350,7 @@ def bootstrap(data, bootnum=100, samples=None, bootfunc=None):
             boot[i] = bootfunc(data[bootarr])
 
     return boot
+
 
 def bar_plot(ax, data, colors=None, total_width=0.8, single_width=1, legend=True):
     """Draws a bar plot with multiple bars per data point.
