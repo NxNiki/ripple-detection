@@ -42,7 +42,33 @@ def downsample_sleep_score(sleep_score: np.ndarray, original_sr: int = 2000, bin
     return downsampled
 
 
-def plot_sleep_stages(sleep_scores: np.ndarray) -> None:
+def sleep_score_legend():
+    legend_elements: List[plt.Rectangle] = [
+        plt.Rectangle((0, 0), 1, 1, color=SLEEP_STAGE_COLORS[score], label=SLEEP_STAGE_LABELS[score])
+        for score in SLEEP_STAGE_COLORS
+    ]
+    return legend_elements
+
+
+def sleep_score_iterator(sleep_score: np.array, sampling_rate: float = 1/30) -> Tuple[int, int, int]:
+    """
+    returns the start end time (in seconds) of sleep stage block and value
+    """
+
+    start_index = get_block_start_index(sleep_score)
+    for i in range(len(start_index)-1):
+        yield start_index[i] / sampling_rate, start_index[i+1] / sampling_rate, sleep_score[start_index[i]]
+
+
+def get_block_start_index(array: np.array) -> List[int]:
+    array = np.insert(array, 0, 999)
+    array = np.append(array, 999)
+
+    block_start_idx = list(np.where(np.diff(array) != 0)[0])
+    return block_start_idx
+
+
+def plot_sleep_stages(sleep_scores: np.ndarray, sleep_score_fs: float = 1/30) -> None:
     """
     Plots sleep stages based on a NumPy array of sleep scores.
 
@@ -51,31 +77,89 @@ def plot_sleep_stages(sleep_scores: np.ndarray) -> None:
             -1.0 represents REM,
             1.0 represents non-REM,
             0.0 represents Other.
+        sleep_score_fs (float):
     """
 
-    # Create a time axis (assuming each score corresponds to a 30-second epoch)
-    time: np.ndarray = np.arange(len(sleep_scores)) * 30 / 60  # Convert to minutes
-
-    # Create the plot
     fig, ax = plt.subplots(figsize=(10, 4))
+    for time_start, time_end, score in sleep_score_iterator(sleep_scores, sleep_score_fs):
+        ax.axvspan(
+            xmin=time_start / SECONDS_PER_HOUR,
+            xmax=time_end / SECONDS_PER_HOUR,
+            color=SLEEP_STAGE_COLORS[score],
+            alpha=0.3
+        )
 
-    # Plot each sleep stage as a block (without edge color)
-    for i, score in enumerate(sleep_scores):
-        ax.barh(0, width=0.5, height=1, left=time[i], color=SLEEP_STAGE_COLORS[score])
-
-    # Set labels and title
     ax.set_xlabel('Time (minutes)')
     ax.set_yticks([])  # Hide y-axis ticks
     ax.set_title('Sleep Stages')
+    ax.legend(handles=sleep_score_legend(), loc='upper right')
 
-    # Create legend
-    legend_elements: list[plt.Rectangle] = [
-        plt.Rectangle((0, 0), 1, 1, color=SLEEP_STAGE_COLORS[score], label=SLEEP_STAGE_LABELS[score])
-        for score in SLEEP_STAGE_COLORS
-    ]
-    ax.legend(handles=legend_elements, loc='upper right')
+    plt.show()
 
-    # Show the plot
+
+def plot_ripple_raster(
+        start_index: np.ndarray,
+        sampling_rate: float,
+        bin_size: int = 30,
+        event_name: str = 'Ripple',
+        sleep_score: np.ndarray = None,
+        sleep_score_fs: float = 1/30,
+) -> None:
+    """
+    Plots a raster of ripple events along with a ripple rate curve.
+
+    Args:
+        start_index (np.ndarray): The index of the start of ripple activities.
+        sampling_rate (float): Used to calculate time stamps of ripples.
+        bin_size (int): In seconds, used to calculate ripple rate in time bin.
+        event_name (str): used to show labels on the plot
+        sleep_score (np.ndarray): add sleep stage as blocks to the plot
+        sleep_score_fs (float): sampling frequency of sleep score.
+    """
+    start_time = start_index / sampling_rate  # Convert index to time in seconds
+    duration = start_time.max() - start_time.min()  # Total duration in seconds
+
+    if duration > SECONDS_PER_HOUR * 2:
+        time_unit = SECONDS_PER_HOUR
+        x_label = "Time (hours)"
+        x_ticks = range(1, int(start_time.max()) // time_unit + 1)
+    else:
+        time_unit = 1
+        x_label = "Time (s)"
+        x_ticks = range(1, int(start_time.max()), 60)
+
+    # Compute ripple rate per bin
+    bins = np.arange(start_time.min(), start_time.max() + bin_size, bin_size)
+    ripple_rate, _ = np.histogram(start_time, bins=bins)
+
+    # Convert bins to appropriate time unit
+    bin_centers = (bins[:-1] + bins[1:]) / 2 / time_unit
+
+    fig, ax1 = plt.subplots(figsize=(20, 4))
+    # Raster plot
+    ax1.scatter(start_time / time_unit, np.random.rand(len(start_time)), s=0.1, color="k")
+    ax1.set_xlabel(x_label)
+    ax1.set_ylabel("Channel")
+    ax1.set_xlim(start_time.min() / time_unit, start_time.max() / time_unit)
+    ax1.set_xticks(x_ticks)
+
+    # Ripple rate plot
+    ax2 = ax1.twinx()
+    ax2.plot(bin_centers, ripple_rate, color="r", label=f"{event_name} Rate")
+    ax2.set_ylabel(f"{event_name} Rate (events/{bin_size} s)")
+
+    # add sleep stage as background
+    if sleep_score is not None:
+        for time_start, time_end, score in sleep_score_iterator(sleep_score, sleep_score_fs):
+            ax1.axvspan(
+                xmin=time_start / time_unit,
+                xmax=time_end / time_unit,
+                color=SLEEP_STAGE_COLORS[score],
+                alpha=0.3
+            )
+        ax1.legend(handles=sleep_score_legend(), loc='upper right')
+
+    plt.title(f"{event_name} Events Over Time")
     plt.show()
 
 
@@ -88,35 +172,35 @@ def plot_two_sleep_stages(sleep_scores_1: np.ndarray, sleep_scores_2: np.ndarray
         sleep_scores_2 (np.ndarray): Second sleep score array.
         labels (List[str]): Labels for the two sleep scores (e.g., ['Subject 1', 'Subject 2']).
     """
-    # Define the colors and labels for each sleep stage
-
-
-    # Create a time axis (assuming each score corresponds to a 30-second epoch)
-    time: np.ndarray = np.arange(len(sleep_scores_1)) * 30 / 60  # Convert to minutes
 
     # Create the plot
     fig, ax = plt.subplots(figsize=(10, 3))
 
     # Plot the first sleep score
-    for i, score in enumerate(sleep_scores_1):
-        ax.barh(0, width=0.5, height=1, left=time[i], color=SLEEP_STAGE_COLORS[score], edgecolor='none')
+    for time_start, time_end, score in sleep_score_iterator(sleep_scores_1):
+        ax.fill_betweenx(
+            y=[0, .49],  # Define the vertical range
+            x1=time_start / SECONDS_PER_HOUR,
+            x2=time_end / SECONDS_PER_HOUR,
+            color=SLEEP_STAGE_COLORS[score],
+            alpha=0.3
+        )
 
     # Plot the second sleep score
-    for i, score in enumerate(sleep_scores_2):
-        ax.barh(1, width=0.5, height=1, left=time[i], color=SLEEP_STAGE_COLORS[score], edgecolor='none')
+    for time_start, time_end, score in sleep_score_iterator(sleep_scores_2):
+        ax.fill_betweenx(
+            y=[.51, 1],  # Define the vertical range
+            x1=time_start / SECONDS_PER_HOUR,
+            x2=time_end / SECONDS_PER_HOUR,
+            color=SLEEP_STAGE_COLORS[score],
+            alpha=0.3
+        )
 
-    # Set labels and title
-    ax.set_xlabel('Time (minutes)')
+    ax.set_xlabel('Time (hour)')
     ax.set_yticks([0, 1])  # Set y-ticks to correspond to the two sleep scores
     ax.set_yticklabels(labels)  # Add labels for the two sleep scores
     ax.set_title('Sleep Stages Comparison')
-
-    # Create legend for sleep stages
-    legend_elements: List[plt.Rectangle] = [
-        plt.Rectangle((0, 0), 1, 1, color=SLEEP_STAGE_COLORS[score], label=SLEEP_STAGE_LABELS[score])
-        for score in SLEEP_STAGE_COLORS
-    ]
-    ax.legend(handles=legend_elements, loc='upper right')
+    ax.legend(handles=sleep_score_legend(), loc='upper right')
 
     # Show the plot
     plt.tight_layout()
@@ -194,19 +278,14 @@ def load_sleep_score(file_name: str) -> np.ndarray:
     - All other values to 1.
 
     Args:
-        file_path (str): Path to the .csv file.
+        file_name (str): Path to the .csv file.
 
     Returns:
         np.ndarray: A NumPy array of integer values.
     """
 
-    # Read the first column of the .csv file, skipping the header
     df = pd.read_csv(file_name, usecols=[0], header=None, skiprows=1)
-
-    # Map 'Wake/REM' to -1 and all other values to 1
     mapped_values = df[0].apply(lambda x: REM_CODE if x.strip() == 'Wake/REM' else NON_REM_CODE)
-
-    # Convert the mapped values to a NumPy array of integers
     return mapped_values.to_numpy()
 
 
@@ -227,6 +306,7 @@ def plot_ripple_rate_by_sleep_state(
         sampling_rate (int): Sampling rate of the ripple_indices in Hz (default is 500 Hz).
         sleep_score_sr (float): Sampling rate of sleep_states in Hz (default is 1/30 Hz).
         segment_duration (float): split plots for each segment (default is 1 hour).
+        event_name (str):
 
     Returns:
         None: Displays a bar plot of ripple rates for REM and non-REM sleep.
