@@ -9,8 +9,7 @@ import numpy as np
 from typing import Tuple, List
 from nwb_pipeline.csc_reader import combine_csc
 from ripple_detection.neuralynx_ripple import filter_data, get_ripple_stats
-
-SECONDS_PER_HOUR = 3600
+from sleep_score.analysis import SECONDS_PER_HOUR
 
 
 def read_csc_data(
@@ -46,13 +45,13 @@ def read_csc_data(
 
 if __name__ == '__main__':
 
-    macro_file_path = '/Users/XinNiuAdmin/HoffmanMount/data/PIPELINE_vc/ANALYSIS/MovieParadigm/566_MovieParadigm/Experiment-8/CSC_macro'
+    macro_file_path = '/Users/XinNiuAdmin/HoffmanMount/data/PIPELINE_vc/ANALYSIS/MovieParadigm/561_MovieParadigm/Experiment-4/CSC_macro'
     macro_files_reference = [
-            ["RMH1_001.mat", "RMH1_002.mat", "RMH1_003.mat", "RMH1_004.mat", "RMH1_005.mat"]
+            ["LMH1_001.mat", "LMH1_002.mat", "LMH1_003.mat", "LMH1_004.mat", "LMH1_005.mat"]
         ]
 
     macro_files = [
-            ["RMH2_001.mat", "RMH2_002.mat", "RMH2_003.mat", "RMH2_004.mat", "RMH2_005.mat"]
+            ["LMH5_001.mat", "LMH5_002.mat", "LMH5_003.mat", "LMH5_004.mat", "LMH5_005.mat"]
         ]
 
     macro_timestamps_files = [
@@ -63,10 +62,10 @@ if __name__ == '__main__':
         "lfpTimeStamps_005.mat",
     ]
 
-    output_file = os.path.join(os.path.dirname(macro_file_path), 'ripple_detection', 'RMH2.npz')
+    output_file = os.path.join(os.path.dirname(macro_file_path), 'ripple_detection', 'LMH.npz')
     macro_data, sr = read_csc_data(macro_file_path, macro_files_reference, macro_files, macro_timestamps_files)
 
-    ch_names = ['RMH']
+    ch_names = ['LMH']
     ch_types = ['seeg']
 
     macro_ripple, macro_ied = filter_data(macro_data, sr, ch_names, ch_types)
