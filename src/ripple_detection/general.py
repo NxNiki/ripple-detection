@@ -1,19 +1,22 @@
 ## These are general .py programs written to be used across all programs ##
 # 2020-01-09 JS
+import os, glob
 from typing import Tuple
 import numpy as np
 import matplotlib.pyplot as plt
-from cmlreaders import CMLReader, get_data_index
-import os
+
 
 def listUnion(li1, li2): # union of two lists
     return list(set().union(li1,li2))
-                
+
+
 def listDiffs(li1, li2): # get differences between two lists
     return list(list(set(li1)-set(li2)) + list(set(li2)-set(li1)))
 
+
 def listIntersect(li1, li2): # intersection of two lists
     return [value for value in li1 if value in li2]
+
 
 def isNaN(num):
     # handles strings, float8, and float64 unlike np.isnan
@@ -21,11 +24,14 @@ def isNaN(num):
     second_test = num == 'nan' # some string types don't work with above line
     return initial_test | second_test
 
+
 def nameAsString(string):
     for k, v in list(locals().iteritems()):
          if v is string:
             name_as_str = k
     return name_as_str
+
+
 def splitUpString(string,delimiter=''):
     if delimiter == '':
         split_array = np.array(list(map(float,string.split())))
@@ -33,9 +39,11 @@ def splitUpString(string,delimiter=''):
         split_array = np.array(list(map(float,string.split(delimiter))))
     return split_array
 
+
 def atoi(text):
     # for natural_keys below
     return int(text) if text.isdigit() else text
+
 
 def natural_keys(text):
     '''
@@ -45,17 +53,7 @@ def natural_keys(text):
     import re
     return [ atoi(c) for c in re.split(r'(\d+)', text) ]
 
-def CMLReadDFRow(row):
-    ''' # Use like this:
-        for row in df.itertuples():
-            reader = CMLReadDFRow(row)
-    '''
-    rd = row._asdict() # this takes df and takes values from 1 row as a dict
-    return CMLReader(rd['subject'], rd['experiment'], rd['session'], \
-                     montage=int(rd['montage']), localization=int(rd['localization']))
-    # dirty secret: Readers reads: eegoffset, experiment, subject, and eegfile...but really should
-    # pass in sessions since sampling rate could theoretically change...
-    
+
 def set_pubfig():
     # seaborn parameters for publication figures
     import seaborn as sb
@@ -191,15 +189,16 @@ def addOnesColumn(X):
     return X
 
 def fileDeleter(path,partial_name):
-    import os,glob
-    for filename in glob.glob(path+partial_name+"*"):        
+    """
+    use these to delete the files made by ClusterRun:
+    fileDeleter("/home1/john/thetaBurst/code/","sge_engine")
+    fileDeleter("/home1/john/thetaBurst/code/","sge_controller")
+    fileDeleter("/home1/john/thetaBurst/code/","bcbio-e")
+    """
+
+    for filename in glob.glob(path+partial_name+"*"):
         os.remove(filename)
-'''
-use these to delete the files made by ClusterRun:
-fileDeleter("/home1/john/thetaBurst/code/","sge_engine")
-fileDeleter("/home1/john/thetaBurst/code/","sge_controller")
-fileDeleter("/home1/john/thetaBurst/code/","bcbio-e")
-'''
+
 
 def get_logical_chunks(array):
     # find start and end indices for chunks of values >0 in an array
@@ -254,11 +253,13 @@ def get_logical_chunks2(array: np.array) -> Tuple[np.array, np.array]:
 
 def bootstrap(data, bootnum=100, samples=None, bootfunc=None):
     """Performs bootstrap resampling on numpy arrays.
+
     Bootstrap resampling is used to understand confidence intervals of sample
     estimates. This function returns versions of the dataset resampled with
     replacement ("case bootstrapping"). These can all be run through a function
     or statistic to produce a distribution of values which can then be used to
     find the confidence intervals.
+
     Parameters
     ----------
     data : numpy.ndarray
@@ -266,62 +267,71 @@ def bootstrap(data, bootnum=100, samples=None, bootfunc=None):
         index, so the first index should access the relevant information
         to be bootstrapped.
     bootnum : int, optional
-        Number of bootstrap resamples
+        Number of bootstrap resamples.
     samples : int, optional
         Number of samples in each resample. The default `None` sets samples to
-        the number of datapoints
+        the number of datapoints.
     bootfunc : function, optional
         Function to reduce the resampled data. Each bootstrap resample will
         be put through this function and the results returned. If `None`, the
-        bootstrapped data will be returned
+        bootstrapped data will be returned.
+
     Returns
     -------
     boot : numpy.ndarray
         If bootfunc is None, then each row is a bootstrap resample of the data.
         If bootfunc is specified, then the columns will correspond to the
         outputs of bootfunc.
+
     Examples
     --------
     Obtain a twice resampled array:
-    >>> from astropy.stats import bootstrap
-    >>> import numpy as np
-    >>> from astropy.utils import NumpyRNGContext
-    >>> bootarr = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0])
-    >>> with NumpyRNGContext(1):
-    ...     bootresult = bootstrap(bootarr, 2)
-    ...
-    >>> bootresult  # doctest: +FLOAT_CMP
-    array([[6., 9., 0., 6., 1., 1., 2., 8., 7., 0.],
-           [3., 5., 6., 3., 5., 3., 5., 8., 8., 0.]])
-    >>> bootresult.shape
-    (2, 10)
-    Obtain a statistic on the array
-    >>> with NumpyRNGContext(1):
-    ...     bootresult = bootstrap(bootarr, 2, bootfunc=np.mean)
-    ...
-    >>> bootresult  # doctest: +FLOAT_CMP
-    array([4. , 4.6])
-    Obtain a statistic with two outputs on the array
-    >>> test_statistic = lambda x: (np.sum(x), np.mean(x))
-    >>> with NumpyRNGContext(1):
-    ...     bootresult = bootstrap(bootarr, 3, bootfunc=test_statistic)
-    >>> bootresult  # doctest: +FLOAT_CMP
-    array([[40. ,  4. ],
-           [46. ,  4.6],
-           [35. ,  3.5]])
-    >>> bootresult.shape
-    (3, 2)
-    Obtain a statistic with two outputs on the array, keeping only the first
-    output
-    >>> bootfunc = lambda x:test_statistic(x)[0]
-    >>> with NumpyRNGContext(1):
-    ...     bootresult = bootstrap(bootarr, 3, bootfunc=bootfunc)
-    ...
-    >>> bootresult  # doctest: +FLOAT_CMP
-    array([40., 46., 35.])
-    >>> bootresult.shape
-    (3,)
+
+    ```python
+    from astropy.stats import bootstrap
+    import numpy as np  # noqa: F401
+    from astropy.utils import NumpyRNGContext
+
+    bootarr = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0])
+    with NumpyRNGContext(1):
+        bootresult = bootstrap(bootarr, 2)
+
+    print(bootresult)  # Example output
+    print(bootresult.shape)  # Expected: (2, 10)
+    ```
+
+    Obtain a statistic on the array:
+
+    ```python
+    with NumpyRNGContext(1):
+        bootresult = bootstrap(bootarr, 2, bootfunc=np.mean)
+
+    print(bootresult)  # Example output
+    ```
+
+    Obtain a statistic with two outputs on the array:
+
+    ```python
+    test_statistic = lambda x: (np.sum(x), np.mean(x))
+    with NumpyRNGContext(1):
+        bootresult = bootstrap(bootarr, 3, bootfunc=test_statistic)
+
+    print(bootresult)
+    print(bootresult.shape)  # Expected: (3, 2)
+    ```
+
+    Obtain a statistic with two outputs on the array, keeping only the first output:
+
+    ```python
+    bootfunc = lambda x: test_statistic(x)[0]
+    with NumpyRNGContext(1):
+        bootresult = bootstrap(bootarr, 3, bootfunc=bootfunc)
+
+    print(bootresult)
+    print(bootresult.shape)  # Expected: (3,)
+    ```
     """
+
     if samples is None:
         samples = data.shape[0]
 
