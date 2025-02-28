@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import sys
 import os
-import matplotlib.pyplot as plt
 from copy import copy
 import functools
 import datetime
@@ -18,7 +17,7 @@ import seaborn as sb
 
 # from ptsa.data.filters import morlet
 # from ptsa.data.filters import ButterworthFilter
-from ripple_detection.general import superVstack, findInd, isNaN, CMLReadDFRow, get_logical_chunks2
+from ripple_detection.general import superVstack, findInd, isNaN, get_logical_chunks2
 
 
 def write_log(s, log_name):

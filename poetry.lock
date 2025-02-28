@@ -2112,8 +2112,8 @@ tqdm = "^4.66.1"
 [package.source]
 type = "git"
 url = "git@github.com:NxNiki/nwbPipeline.git"
-reference = "dev-sleep_score"
-resolved_reference = "51fe20fcd4be22dfe57fbf848414ab4bf5f5d5fc"
+reference = "main"
+resolved_reference = "38d7642091671a6e3b95ba1703a695f10a4a1605"
 
 [[package]]
 name = "overrides"
@@ -3827,4 +3827,4 @@ viz = ["cartopy", "matplotlib", "nc-time-axis", "seaborn"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "5865095b606d627ed256af96dbc5d732d9cd49cd327aa81e8e380d9ec507fe13"
+content-hash = "6db5033e45f4ef76ecbb8c36bd6b0c72a9ffd506fbe53319db20098391ac9e96"
